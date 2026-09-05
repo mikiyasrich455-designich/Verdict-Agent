@@ -56,16 +56,6 @@ async function callAceChat(messages, model = 'grok-4', maxTokens = 4000) {
   return data.choices[0].message.content
 }
 
-// Inline cleanup for cache (no setInterval in serverless)
-let lastCacheCleanup = 0
-function maybeCleanCache() {
-  const now = Date.now()
-  if (now - lastCacheCleanup > 2 * 60 * 1000) {
-    lastCacheCleanup = now
-    import('../../lib/cache.js').then(({ clearCache }) => { /* periodic handled by runtime */ })
-  }
-}
-
 // ── Deep forensic analysis ───────────────────────────────────────
 
 async function deepAnalyze(symbol) {
