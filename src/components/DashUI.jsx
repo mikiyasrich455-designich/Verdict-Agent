@@ -4,14 +4,38 @@ import { motion } from 'framer-motion'
 
 const POPULAR_TOKENS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'MATIC']
 
-export const fmtUsd = (n) =>
-  n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B`
-    : n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M`
-    : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K`
-    : `$${Number(n).toFixed(n < 1 ? 4 : 2)}`
+export const fmtUsd = (v) => {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '—'
+  const n = Number(v)
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`
+  return `${sign}$${n.toFixed(2)}`
+}
 
-export const fmtPct = (n) => `${n >= 0 ? '+' : ''}${Number(n).toFixed(2)}%`
-export const changeColor = (n) => (n >= 0 ? 'text-success' : 'text-danger')
+// Memecoins price in the 7th decimal — fixed 2dp would render "$0.00".
+export const fmtPrice = (v) => {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n === 0) return '—'
+  const abs = Math.abs(n)
+  if (abs >= 1000) return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+  if (abs >= 1) return `$${n.toFixed(4)}`
+  if (abs >= 0.01) return `$${n.toFixed(5)}`
+  const digits = Math.min(12, Math.max(4, Math.ceil(-Math.log10(abs)) + 3))
+  return `$${n.toFixed(digits)}`
+}
+
+export const fmtNum = (v) => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return n.toLocaleString('en-US')
+}
+
+export const fmtPct = (v) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`)
+export const changeColor = (v) => (Number(v) >= 0 ? 'text-up' : 'text-down')
 
 // Source health badge — the honesty layer judges look for.
 const SOURCE_META = {

@@ -8,6 +8,7 @@ import VerdictCard, { ShareCard, POINT_LABELS } from '../components/VerdictCard'
 import ReasoningPanel from '../components/ReasoningPanel'
 import { fetchVerdict } from '../lib/api'
 import { resolveTokenInput } from '../components/DashboardShell'
+import { setActiveToken, tokenQuery } from '../lib/activeToken'
 
 export default function VerdictPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -42,10 +43,11 @@ export default function VerdictPage() {
       setElapsed(0)
       startTimeRef.current = Date.now()
       try {
-        // Resolve CA / name / ticker to a live ticker before running the verdict
-        const symbol = await resolveTokenInput(rawInput)
-        setSearchParams({ token: symbol }, { replace: true })
-        const result = await fetchVerdict(symbol)
+        // Resolve CA / name / ticker to a live identity before running the verdict
+        const identity = await resolveTokenInput(rawInput)
+        setActiveToken(identity)
+        setSearchParams(tokenQuery(identity), { replace: true })
+        const result = await fetchVerdict(identity.symbol)
         setVerdict(result)
         setState('done')
       } catch (err) {
@@ -58,10 +60,10 @@ export default function VerdictPage() {
     [setSearchParams]
   )
 
-  // Auto-run when URL has ?token=
+  // Auto-run when URL has ?token= — a ?ca= in the URL pins the exact contract.
   useEffect(() => {
     const token = searchParams.get('token')
-    if (token && state === 'idle') runAnalysis(token)
+    if (token && state === 'idle') runAnalysis(searchParams.get('ca') || token)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 

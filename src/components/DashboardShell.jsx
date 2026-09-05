@@ -12,22 +12,44 @@ import {
 } from 'lucide-react'
 import Logo from './Logo'
 import { resolveToken } from '../lib/api'
+import { getActiveToken, setActiveToken, identityForSymbol, tokenHref, shortCa } from '../lib/activeToken'
 
 // Plain tickers that DexScreener may not know (e.g. BTC, ETH) still work
 // downstream via RYO — let those through unverified.
 const TICKER_LIKE = /^[A-Za-z][A-Za-z0-9.$_-]{0,11}$/
 
+const unverified = (input) => ({
+  symbol: input.toUpperCase(), name: input.toUpperCase(),
+  ca: '', chain: '', logo: '', banner: '', resolved: false,
+})
+
+// Resolve a pasted CA / name / ticker to a full identity — never just a ticker.
+// "ACE" is a different asset on every chain, so dropping the contract address
+// here is what used to hand back the wrong token.
 export async function resolveTokenInput(raw) {
   const input = String(raw || '').trim()
   if (!input) throw new Error('Enter a token, name, or contract address')
+  // A contract address has exactly one answer. If it can't be resolved there is
+  // no safe fallback — answering for a same-ticker lookalike would be a lie.
+  const mustResolve = !TICKER_LIKE.test(input)
   try {
     const data = await resolveToken(input)
-    return data.symbol || input.toUpperCase()
-  } catch (err) {
-    if (TICKER_LIKE.test(input) && !/[1-9A-HJ-NP-Za-km-z]{32,}/.test(input)) {
-      return input.toUpperCase()
+    if (data?.symbol) {
+      return {
+        symbol: String(data.symbol).toUpperCase(),
+        name: data.name || String(data.symbol).toUpperCase(),
+        ca: data.ca || '',
+        chain: data.chain || '',
+        logo: data.logo || '',
+        banner: data.banner || '',
+        resolved: !!data.resolved,
+      }
     }
-    throw err
+    if (mustResolve) throw new Error(`Couldn't find "${input}" on any supported network`)
+    return unverified(input)
+  } catch (err) {
+    if (mustResolve) throw err
+    return unverified(input)
   }
 }
 
@@ -92,9 +114,8 @@ const TOKEN_SCOPED = [
 ]
 
 // One token drives the whole dashboard — it survives navigation + reloads.
-const TOKEN_KEY = 'verdict_active_token'
-export const getStoredToken = () => localStorage.getItem(TOKEN_KEY) || ''
-export const setStoredToken = (t) => localStorage.setItem(TOKEN_KEY, t)
+// (the {symbol, ca, chain} identity itself lives in ../lib/activeToken)
+export { getStoredToken, getActiveToken } from '../lib/activeToken'
 
 export function findSkill(pathname) {
   for (const group of NAV_TREE) {
@@ -111,8 +132,16 @@ export function findSkill(pathname) {
 function SideTree({ onNavigate }) {
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
-  const token = searchParams.get('token') || getStoredToken()
-  const active = findSkill(pathname)
+  const focus = searchParams.get('token')
+  const stored = getActiveToken()
+  // The URL token wins, but the stored identity is what carries the CA with it.
+  const active =
+    focus && identityForSymbol(focus)
+      ? identityForSymbol(focus)
+      : focus
+      ? { symbol: focus }
+      : stored
+  const activeSkill = findSkill(pathname)
   const [open, setOpen] = useState(() => {
     const map = {}
     for (const g of NAV_TREE) map[g.id] = true
@@ -128,7 +157,7 @@ function SideTree({ onNavigate }) {
         end
         onClick={onNavigate}
         className={({ isActive }) =>
-          `ftree-item !pl-3 ${isActive && !active ? 'on' : ''}`
+          `ftree-item !pl-3 ${isActive && !activeSkill ? 'on' : ''}`
         }
       >
         <LayoutDashboard size={15} strokeWidth={2} />
@@ -165,8 +194,8 @@ function SideTree({ onNavigate }) {
                     {group.skills.map((skill) => {
                       const SIcon = skill.icon
                       const to =
-                        token && TOKEN_SCOPED.includes(skill.to)
-                          ? `${skill.to}?token=${token}`
+                        active?.symbol && TOKEN_SCOPED.includes(skill.to)
+                          ? tokenHref(skill.to, active)
                           : skill.to
                       return (
                         <NavLink
@@ -208,30 +237,64 @@ function Topbar({ onMenu }) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const focusToken = searchParams.get('token') || ''
+  const activeToken = useMemo(
+    () => (focusToken ? identityForSymbol(focusToken) || { symbol: focusToken } : getActiveToken()),
+    [focusToken, searchParams]
+  )
   const [query, setQuery] = useState('')
   const found = useMemo(() => findSkill(pathname), [pathname])
 
-  // remember whatever token lands in the URL
+  const [resolving, setResolving] = useState(false)
+  const [resolveErr, setResolveErr] = useState('')
+
+  // remember whatever token lands in the URL — the CA travels with it so the
+  // dashboard never forgets which "ACE" the user actually asked about.
   useEffect(() => {
     const t = searchParams.get('token')
-    if (t) setStoredToken(t)
+    if (!t) return
+    const ca = searchParams.get('ca') || ''
+    const chain = searchParams.get('chain') || ''
+    if (ca) {
+      setActiveToken({ symbol: t, ca, chain, name: searchParams.get('name') || '' })
+      return
+    }
+    // URL carries a bare ticker: re-attach the stored CA, and keep the logo in
+    // the store fresh for the header.
+    const stored = identityForSymbol(t)
+    if (stored?.ca) {
+      setSearchParams(
+        (prev) => {
+          prev.set('ca', stored.ca)
+          if (stored.chain) prev.set('chain', stored.chain)
+          return prev
+        },
+        { replace: true }
+      )
+    } else if (stored) {
+      setActiveToken(stored)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
   // token-scoped skill with no token? restore the saved one so the page just works
   useEffect(() => {
     if (!focusToken && TOKEN_SCOPED.includes(pathname)) {
-      const stored = getStoredToken()
-      if (stored) {
-        setSearchParams((prev) => {
-          prev.set('token', stored)
-          return prev
-        }, { replace: true })
+      const stored = getActiveToken()
+      if (stored?.symbol) {
+        setSearchParams(
+          (prev) => {
+            prev.set('token', stored.symbol)
+            if (stored.ca) {
+              prev.set('ca', stored.ca)
+              if (stored.chain) prev.set('chain', stored.chain)
+            }
+            return prev
+          },
+          { replace: true }
+        )
       }
     }
   }, [pathname, focusToken, setSearchParams])
-
-  const [resolving, setResolving] = useState(false)
-  const [resolveErr, setResolveErr] = useState('')
 
   const submit = async (e) => {
     e.preventDefault()
@@ -240,16 +303,26 @@ function Topbar({ onMenu }) {
     setResolveErr('')
     setResolving(true)
     try {
-      const symbol = await resolveTokenInput(raw)
+      const identity = await resolveTokenInput(raw)
+      setActiveToken(identity)
       setQuery('')
       setResolving(false)
       if (TOKEN_SCOPED.includes(pathname)) {
-        setSearchParams((prev) => {
-          prev.set('token', symbol)
-          return prev
-        })
+        setSearchParams(
+          (prev) => {
+            prev.set('token', identity.symbol)
+            if (identity.ca) {
+              prev.set('ca', identity.ca)
+              if (identity.chain) prev.set('chain', identity.chain)
+            } else {
+              prev.delete('ca')
+              prev.delete('chain')
+            }
+            return prev
+          }
+        )
       } else {
-        navigate(`/dashboard/analysis?token=${symbol}`)
+        navigate(tokenHref('/dashboard/analysis', identity))
       }
     } catch (err) {
       setResolving(false)
@@ -309,9 +382,19 @@ function Topbar({ onMenu }) {
       </form>
 
       {focusToken && (
-        <span className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] text-accent bg-accent/10 border border-accent/25 rounded-full px-3 py-1">
-          <Crosshair size={11} />
-          {focusToken}
+        <span
+          title={activeToken?.ca ? `Pinned to ${activeToken.ca}` : activeToken?.name || focusToken}
+          className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] text-accent bg-accent/10 border border-accent/25 rounded-full px-3 py-1 max-w-[220px]"
+        >
+          {activeToken?.logo ? (
+            <img src={activeToken.logo} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <Crosshair size={11} className="flex-shrink-0" />
+          )}
+          <span className="truncate">{focusToken}</span>
+          {activeToken?.ca && (
+            <span className="text-faint">· {shortCa(activeToken.ca)}</span>
+          )}
         </span>
       )}
 

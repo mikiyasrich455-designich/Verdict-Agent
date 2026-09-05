@@ -22,6 +22,8 @@ export default {
         success: '#34d399',
         warning: '#fbbf24',
         danger: '#f87171',
+        up: '#34d399',
+        down: '#f87171',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

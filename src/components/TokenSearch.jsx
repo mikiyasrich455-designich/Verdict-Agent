@@ -16,12 +16,9 @@ const TOKEN_LOGOS = {
   TON: 'https://assets.coingecko.com/coins/images/17980/large/ton_symbol.png',
 }
 
-export default function TokenSearch({ placeholder = 'Enter a token symbol or contract address…', onSubmit }) {
+export default function TokenSearch({ placeholder = 'Enter a token symbol, name or contract address…', onSubmit }) {
   const [value, setValue] = useState('')
-  const [analyzing, setAnalyzing] = useState(false)
-  const [uploadFeedback, setUploadFeedback] = useState(null)
   const taRef = useRef(null)
-  const fileInputRef = useRef(null)
 
   const submit = (symbol) => {
     const s = (symbol || value).trim()
@@ -35,37 +32,6 @@ export default function TokenSearch({ placeholder = 'Enter a token symbol or con
     setValue(e.target.value)
     e.target.style.height = 'auto'
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-  }
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // Mock: show analyzing state
-    setAnalyzing(true)
-    setUploadFeedback({ type: 'scanning', text: 'Scanning image for token...' })
-
-    // Simulate AI recognition delay
-    setTimeout(() => {
-      // Pick a random token as "recognized"
-      const randomToken = POPULAR_TOKENS[Math.floor(Math.random() * POPULAR_TOKENS.length)]
-      setAnalyzing(false)
-      setUploadFeedback({ type: 'found', text: `Detected: ${randomToken}` })
-
-      // Auto-submit after brief delay
-      setTimeout(() => {
-        submit(randomToken)
-        setUploadFeedback(null)
-      }, 800)
-    }, 1500)
-
-    // Reset file input
-    e.target.value = ''
-  }
-
-  const triggerImageUpload = () => {
-    if (analyzing) return
-    fileInputRef.current?.click()
   }
 
   return (
@@ -84,51 +50,13 @@ export default function TokenSearch({ placeholder = 'Enter a token symbol or con
                 }
               }}
               placeholder={placeholder}
-              aria-label="Token symbol or contract address"
+              aria-label="Token symbol, name or contract address"
               rows={1}
             />
             <div className="chat-input-row">
-              <div className="icon-btns">
-                {/* Image upload button */}
-                <button
-                  className={analyzing ? 'analyzing' : ''}
-                  onClick={triggerImageUpload}
-                  aria-label="Upload image"
-                  title="Upload image to detect token"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">
-                    <path
-                      fill="none"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M7 8v8a5 5 0 1 0 10 0V6.5a3.5 3.5 0 1 0-7 0V15a2 2 0 0 0 4 0V8"
-                    />
-                  </svg>
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  style={{ display: 'none' }}
-                />
-
-                {/* Network / Grid icon */}
-                <button aria-label="Network" title="Network">
-                  <svg viewBox="0 0 24 24" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M4 5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zm0 10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zm10 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zm0-8h6m-3-3v6"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      stroke="currentColor"
-                      fill="none"
-                    />
-                  </svg>
-                </button>
-              </div>
+              <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint pl-1">
+                any chain · resolved live
+              </span>
               <button
                 className="send-btn"
                 onClick={() => submit()}
@@ -146,14 +74,6 @@ export default function TokenSearch({ placeholder = 'Enter a token symbol or con
             </div>
           </div>
         </div>
-
-        {/* Image upload feedback */}
-        {uploadFeedback && (
-          <div className="image-upload-feedback">
-            <div className="scan-line" />
-            <span>{uploadFeedback.text}</span>
-          </div>
-        )}
 
         {/* Token logo circles */}
         <div className="chat-tags" style={{ gap: '10px', padding: '14px 0 0' }}>

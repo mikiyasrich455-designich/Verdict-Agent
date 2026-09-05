@@ -235,19 +235,6 @@ export function normalizeProfile(ryoRaw, fallbackSymbol) {
   const atr = tech.atr_14_pct || 3
   const volatility = clamp(atr * 12, 18, 92)
 
-  // Build price history from performance data
-  const change7d = perf.change_7d_pct || 0
-  const change30d = perf.change_30d_pct || 0
-  const points = 32
-  const priceHistory = []
-  for (let i = 0; i < points; i++) {
-    const t = i / (points - 1)
-    const factor = 1 + (change30d / 100) * t + (change7d / 100) * Math.max(0, t - 0.75) * 4
-    const noise = 1 + (Math.sin(i * 1.7) * 0.015)
-    priceHistory.push({ i, price: Number((priceUsd * noise / Math.max(factor, 0.5)).toFixed(6)) })
-  }
-  if (priceHistory.length > 0) priceHistory[points - 1].price = priceUsd
-
   const mapCatalyst = (c) => {
     if (typeof c === 'string') return { t: c, eta: 'upcoming', impact: 'medium' }
     return { t: c.title || c.event || c.description || 'Catalyst', eta: c.eta || c.timeline || 'upcoming', impact: c.impact || 'medium' }
@@ -275,12 +262,173 @@ export function normalizeProfile(ryoRaw, fallbackSymbol) {
     change24h: perf.change_24h_pct || 0,
     marketCap: market.market_cap_usd || 0,
     volume24h: market.volume_24h_usd || 0,
-    holders: asset.rank ? Math.round(500000 / asset.rank) : 50000,
     volatility,
-    priceHistory,
+    priceHistory: [],
+    chartSource: null,
     catalysts: catalysts.length ? catalysts : [{ t: 'Monitoring ecosystem developments', eta: 'ongoing', impact: 'low' }],
     risks: risks.length ? risks : [{ t: 'No immediate risk flags', sev: 'low' }],
     sentiment: { bull, bear, neutral },
+    aiLayer: 'RYO',
+  }
+}
+
+// ── Live market overlay ────────────────────────────────────────
+// The resolver (DexScreener + GeckoTerminal + CoinGecko) owns identity and every
+// number on the page. RYO only contributes the qualitative layer, and only when it
+// actually described the same asset — a CA-resolved token whose ticker collides with
+// a big-cap elsewhere gets live-derived analysis instead of borrowed research.
+const LIVE_FIELDS = [
+  'symbol', 'name', 'ca', 'chain', 'chainLabel', 'isCA', 'decimals',
+  'logo', 'banner', 'description', 'categories', 'socials', 'websites',
+  'website', 'whitepaper', 'explorer', 'twitter', 'telegram', 'github', 'cgUrl',
+  'exchange', 'exchangeId', 'pairName', 'pairAddress', 'poolAddress', 'dexUrl', 'quoteSymbol',
+  'priceUsd', 'change24h', 'change1h', 'change6h', 'change32h',
+  'marketCap', 'fdv', 'volume24h', 'volume6h', 'tokenVolume24h', 'liquidityUsd', 'poolLiquidityUsd',
+  'totalReserveUsd', 'marketCapFdvRatio', 'circulatingSupply', 'totalSupply',
+  'pairCreatedAt', 'pairAgeDays', 'buys24h', 'sells24h',
+  'uniqueBuyers24h', 'uniqueSellers24h', 'cgRank', 'watchers',
+  'ath', 'athChangePct', 'athDate', 'atl', 'atlChangePct', 'atlDate',
+  'candidates', 'matchType',
+]
+
+const sameAsset = (a, b) =>
+  String(a || '').toLowerCase().replace(/[^a-z0-9]/g, '') ===
+  String(b || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+const money = (v) => {
+  const n = Number(v) || 0
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`
+  return `$${n.toFixed(2)}`
+}
+
+// Volatility index measured from the token's own 24h range, not from a lookalike's ATR.
+const liveVolatility = (live) => clamp((Math.abs(Number(live.change24h) || 0) / 3) * 25, 18, 92)
+
+// Analysis built from the token's own live market structure — used whenever the AI
+// layer can't be trusted to have looked at the same contract.
+function deriveInsights(live) {
+  const liq = Number(live.liquidityUsd) || 0
+  const vol = Number(live.volume24h) || 0
+  const cap = Number(live.marketCap) || 0
+  const buys = Number(live.buys24h) || 0
+  const sells = Number(live.sells24h) || 0
+  const chg = Number(live.change24h) || 0
+  const age = Number(live.pairAgeDays) || 0
+  const trades = buys + sells
+
+  const catalysts = []
+  if (live.exchange) {
+    catalysts.push({
+      t: `${live.exchange}${live.pairName ? ` ${live.pairName}` : ''} pool holding ${money(liq)} of live liquidity`,
+      eta: 'active',
+      impact: liq >= 250000 ? 'high' : 'medium',
+    })
+  }
+  if (live.cgRank) catalysts.push({ t: `Ranked #${live.cgRank} by market cap on CoinGecko`, eta: 'ongoing', impact: 'medium' })
+  if (live.watchers) catalysts.push({ t: `Tracked by ${live.watchers.toLocaleString()} CoinGecko watchlists`, eta: 'ongoing', impact: 'medium' })
+  if (live.categories?.[0]) catalysts.push({ t: `Narrative exposure: ${live.categories.slice(0, 3).join(' · ')}`, eta: 'ongoing', impact: 'medium' })
+  if (age > 180) catalysts.push({ t: `Pool has survived ${Math.round(age)} days of live trading`, eta: 'ongoing', impact: 'low' })
+  if (chg > 0) catalysts.push({ t: `Price up ${chg.toFixed(1)}% over 24h on ${money(vol)} of volume`, eta: 'today', impact: 'medium' })
+  if (!catalysts.length) catalysts.push({ t: 'No catalysts detected in live market data', eta: 'ongoing', impact: 'low' })
+
+  const risks = []
+  if (liq && liq < 15000) risks.push({ t: `Only ${money(liq)} pooled — a single mid-size sell moves the price hard`, sev: 'critical' })
+  else if (liq && liq < 75000) risks.push({ t: `Thin liquidity at ${money(liq)} — expect meaningful slippage on exit`, sev: 'high' })
+  if (cap && vol < cap * 0.01) risks.push({ t: `Dead tape: ${money(vol)} of 24h volume against a ${money(cap)} cap`, sev: 'high' })
+  if (trades && sells > buys * 1.5) risks.push({ t: `Distribution bias — ${sells} sells vs ${buys} buys in 24h`, sev: 'high' })
+  if (age && age < 30) risks.push({ t: `Unproven structure — pool is only ${age.toFixed(1)} days old`, sev: 'medium' })
+  if (live.marketCapFdvRatio && live.marketCapFdvRatio < 0.5) {
+    risks.push({ t: `Supply overhang: market cap is only ${(live.marketCapFdvRatio * 100).toFixed(0)}% of FDV`, sev: 'medium' })
+  }
+  if (live.athChangePct && live.athChangePct < -90) {
+    risks.push({ t: `Down ${Math.abs(live.athChangePct).toFixed(1)}% from its all-time high`, sev: 'medium' })
+  }
+  if (!live.cgCoinId && !live.cgRank) risks.push({ t: 'Not indexed on CoinGecko — no independent fundamentals layer', sev: 'medium' })
+  if (!risks.length) risks.push({ t: 'No structural red flags in the live market data', sev: 'low' })
+
+  const buyPressure = trades ? buys / trades : 0.5
+  const bull = clamp(45 + chg * 1.1 + (buyPressure - 0.5) * 60 + (liq >= 250000 ? 10 : liq < 50000 ? -10 : 0))
+  const bear = clamp(45 - chg * 1.1 + (0.5 - buyPressure) * 60 + (liq < 50000 ? 12 : 0) + (vol < 1000 ? 10 : 0))
+  const neutral = Math.max(0, 100 - bull - bear)
+
+  return { catalysts, risks, sentiment: { bull, bear, neutral } }
+}
+
+/**
+ * Merge a live resolver profile onto the AI-layer profile.
+ * @param {object|null} base  normalizeProfile() output, or null when RYO is down
+ * @param {object} live       resolveToken() output for the exact contract address
+ */
+export function applyLiveData(base, live) {
+  if (!live) return base
+  const profile = base ? { ...base } : {}
+  const derived = deriveInsights(live)
+  // Snapshot the AI layer's own idea of the asset before the live identity overwrites it.
+  const aiSymbol = base && base.symbol
+  const aiName = base && base.name
+
+  for (const f of LIVE_FIELDS) {
+    const v = live[f]
+    if (v !== null && v !== undefined && v !== '' && (!Array.isArray(v) || v.length)) profile[f] = v
+  }
+  profile.isCA = !!live.ca
+  profile.priceHistory = Array.isArray(live.priceHistory) ? live.priceHistory : []
+  profile.chartSource = live.chartSource || null
+  profile.resolved = !!live.resolved
+
+  const trusted = !!base && live.resolved && sameAsset(aiSymbol, live.symbol) && sameAsset(aiName, live.name)
+  if (trusted) {
+    profile.aiLayer = base.aiLayer || 'RYO'
+    profile.aiNote = null
+  } else {
+    // RYO either failed or answered for a different asset with the same ticker.
+    profile.catalysts = derived.catalysts
+    profile.risks = derived.risks
+    profile.sentiment = derived.sentiment
+    profile.volatility = liveVolatility(live)
+    profile.aiLayer = base ? 'Live market structure' : null
+    profile.aiNote = base
+      ? `AI layer returned "${base.name}" for this ticker — analysis below is derived from the live market instead.`
+      : 'AI layer unavailable — analysis is derived from live market data.'
+  }
+  return profile
+}
+
+// Live-only profile (used when the AI layer is down but the market data is fine).
+export function profileFromLive(live) {
+  return applyLiveData(null, live)
+}
+
+/**
+ * Attach the canonical identity + live numbers to any AI payload (verdict, debate,
+ * risk desk, studio script, KOL narrative) so no page can render the wrong token.
+ * `aiMismatch` flags research that was generated for a same-ticker lookalike.
+ */
+export function withLiveIdentity(payload, live) {
+  if (!live || !payload) return payload
+  const mismatch =
+    !!live.resolved && !(sameAsset(payload.symbol, live.symbol) && sameAsset(payload.name, live.name))
+  return {
+    ...payload,
+    symbol: live.symbol || payload.symbol,
+    name: live.name || payload.name,
+    ca: live.ca || payload.ca || null,
+    chain: live.chain || null,
+    chainLabel: live.chainLabel || null,
+    logo: live.logo || null,
+    banner: live.banner || null,
+    exchange: live.exchange || null,
+    priceUsd: live.priceUsd ?? payload.priceUsd,
+    marketCap: live.marketCap ?? payload.marketCap,
+    volume24h: live.volume24h ?? payload.volume24h,
+    change24h: live.change24h ?? payload.change24h,
+    liquidityUsd: live.liquidityUsd ?? payload.liquidityUsd ?? null,
+    aiMismatch: mismatch,
+    aiNote: mismatch
+      ? `AI layer analysed "${payload.name}" for this ticker — every figure shown comes from the live contract.`
+      : payload.aiNote || null,
   }
 }
 
@@ -350,11 +498,11 @@ export function normalizeScan(ryoRaw) {
 }
 
 // ── Compare shape ───────────────────────────────────────────────
-export function normalizeCompare(ryoAnalyses) {
-  return ryoAnalyses.map(raw => {
+export function normalizeCompare(ryoAnalyses, identities = []) {
+  return ryoAnalyses.map((raw, i) => {
     const v = normalizeVerdict(raw)
     const p = normalizeProfile(raw)
-    return {
+    return withLiveIdentity({
       symbol: v.symbol,
       name: v.name,
       priceUsd: v.priceUsd,
@@ -367,7 +515,7 @@ export function normalizeCompare(ryoAnalyses) {
       marketCap: p.marketCap,
       volume24h: p.volume24h,
       volatility: p.volatility,
-    }
+    }, identities[i] && identities[i].live)
   })
 }
 
@@ -398,9 +546,15 @@ export function normalizeSentimentShift(ryoRaw) {
 }
 
 // ── Risk desk shape ─────────────────────────────────────────────
-export function normalizeRiskDesk(ryoRaw, limits = { maxPosition: 5, stopLoss: 8, minConviction: 60 }) {
+export function normalizeRiskDesk(ryoRaw, limits = { maxPosition: 5, stopLoss: 8, minConviction: 60 }, live = null) {
   const v = normalizeVerdict(ryoRaw)
   const p = normalizeProfile(ryoRaw)
+
+  // Entries/stops/targets must be priced off the contract the user actually pasted.
+  if (live && Number(live.priceUsd) > 0) {
+    p.priceUsd = live.priceUsd
+    p.volatility = liveVolatility(live)
+  }
 
   const atr = p.priceUsd * (p.volatility / 100) * 0.5
   const entry = p.priceUsd

@@ -2,7 +2,33 @@
 // The proxy holds all API keys (RYO, AceData) and never exposes them to the browser.
 // Every function keeps the same signature the UI expects.
 
+import { identityForSymbol } from './activeToken'
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// A ticker is not an identity. If the active token was resolved from a contract
+// address, pin every request to that address so the backend can never answer
+// for a same-ticker token on another chain.
+function withIdentity(body, identity) {
+  const source = identity || identityForSymbol(body.symbol) || identityFromUrl(body.symbol)
+  if (!source?.ca) return body
+  const { symbol, name, ca, chain } = source
+  return { ...body, ca, chain: chain || undefined, name: name || undefined }
+}
+
+// Shared links carry ?token=X&ca=0x…; honour them even when localStorage is empty.
+function identityFromUrl(symbol) {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const ca = params.get('ca')
+    if (!ca) return null
+    const urlSymbol = (params.get('token') || params.get('symbol') || '').toUpperCase()
+    if (urlSymbol && urlSymbol !== String(symbol || '').toUpperCase()) return null
+    return { symbol, name: params.get('name') || '', ca, chain: params.get('chain') || '' }
+  } catch {
+    return null
+  }
+}
 
 // POST /api/proxy/resolve → live token lookup by contract address, ticker, or name
 // Returns { symbol, name, chain, chainLabel, ca, isCA, priceUsd, liquidityUsd, ... }
@@ -36,7 +62,7 @@ export async function fetchVerdict(symbol, onStep) {
     const res = await fetch('/api/proxy/synthesis/verdict', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol }),
+      body: JSON.stringify(withIdentity({ symbol })),
     })
 
     if (!res.ok) {
@@ -55,7 +81,7 @@ export async function fetchDebate(symbol) {
   const res = await fetch('/api/proxy/synthesis/debate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol }),
+    body: JSON.stringify(withIdentity({ symbol })),
   })
 
   if (!res.ok) {
@@ -97,11 +123,13 @@ export async function fetchScan() {
 }
 
 // POST /api/proxy/ryo/analyze_token → normalized profile shape
-export async function fetchTokenProfile(symbol) {
+// `identity` ({ca, chain, name}) pins the lookup to one contract when the page
+// already knows it — otherwise the stored active token is used.
+export async function fetchTokenProfile(symbol, identity) {
   const res = await fetch('/api/proxy/ryo/analyze_token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol }),
+    body: JSON.stringify(withIdentity({ symbol }, identity)),
   })
 
   if (!res.ok) {
@@ -148,7 +176,7 @@ export async function fetchNarrative(symbol) {
   const res = await fetch('/api/proxy/synthesis/narrative', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol }),
+    body: JSON.stringify(withIdentity({ symbol })),
   })
 
   if (!res.ok) {
@@ -164,7 +192,7 @@ export async function fetchRiskDesk(symbol, limits) {
   const res = await fetch('/api/proxy/synthesis/risk', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol, limits }),
+    body: JSON.stringify(withIdentity({ symbol, limits })),
   })
 
   if (!res.ok) {
@@ -180,7 +208,7 @@ export async function fetchStudioScript(symbol) {
   const res = await fetch('/api/proxy/synthesis/script', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol }),
+    body: JSON.stringify(withIdentity({ symbol })),
   })
 
   if (!res.ok) {

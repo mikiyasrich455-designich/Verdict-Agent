@@ -12,14 +12,27 @@ import {
   normalizeRiskDesk,
   normalizeDebate,
   normalizeVerdict as normalizeVerdictFromRaw,
+  applyLiveData,
+  profileFromLive,
+  withLiveIdentity,
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
-import { resolveCaInBody } from '../lib/caGuard.js'
+import { resolveCaInBody, resolveCaInList } from '../lib/caGuard.js'
+import { shortAddr } from '../lib/tokenResolver.js'
 
 const router = Router()
 
-// Swap pasted contract addresses for live-resolved tickers before any handler runs
+// Swap pasted contract addresses for a live-resolved canonical identity before any
+// handler runs — req.tokenIdentity carries the real token (CA wins over ticker).
 router.use(resolveCaInBody)
+
+// Cache key that survives ticker collisions: the contract address is the discriminator.
+function idKey(req, prefix) {
+  const live = req.tokenIdentity
+  const sym = String(req.body?.symbol || '').toUpperCase()
+  const id = live?.ca || (live?.chain ? `${live.chain}:${sym}` : sym)
+  return `${prefix}:${id.toLowerCase()}`
+}
 
 // RYO MCP tool call helper — reads env lazily, sends FLAT body (no {params} wrapping)
 async function callRyoTool(toolName, body = {}) {
@@ -106,6 +119,8 @@ router.post('/scan_market', async (req, res) => {
 })
 
 // POST /api/proxy/ryo/analyze_token  → returns normalized profile shape
+// Live market data (identity, price, cap, volume, logo, banner, description, exchange)
+// always wins; RYO only supplies the qualitative layer.
 router.post('/analyze_token', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -117,8 +132,9 @@ router.post('/analyze_token', async (req, res) => {
     return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
   }
 
+  const live = req.tokenIdentity || null
   try {
-    const cacheKey = `ryo:analyze:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:analyze')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/analyze_token', 200, Date.now() - start, '(cached)')
@@ -126,8 +142,15 @@ router.post('/analyze_token', async (req, res) => {
     }
 
     // FLAT body — NOT wrapped in {params}
-    const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeProfile(raw, symbol)
+    let data
+    try {
+      const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
+      data = applyLiveData(normalizeProfile(raw, symbol), live)
+    } catch (ryoErr) {
+      if (!live) throw ryoErr
+      error(`analyze_token(${live.ca ? shortAddr(live.ca) : symbol}) AI layer`, ryoErr)
+      data = profileFromLive(live)
+    }
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/analyze_token', 200, Date.now() - start)
     res.json(data)
@@ -150,7 +173,7 @@ router.post('/analyze_verdict', async (req, res) => {
   }
 
   try {
-    const cacheKey = `ryo:verdict:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:verdict')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/analyze_verdict', 200, Date.now() - start, '(cached)')
@@ -158,7 +181,7 @@ router.post('/analyze_verdict', async (req, res) => {
     }
 
     const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeVerdictFromRaw(raw, symbol)
+    const data = withLiveIdentity(normalizeVerdictFromRaw(raw, symbol), req.tokenIdentity)
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/analyze_verdict', 200, Date.now() - start)
     res.json(data)
@@ -168,9 +191,9 @@ router.post('/analyze_verdict', async (req, res) => {
   }
 })
 
-// POST /api/proxy/ryo/compare_tokens — accepts {symbols: ["SOL","AVAX"]}
-// Calls analyze_token per symbol (reuses cache) → normalized compare shape
-router.post('/compare_tokens', async (req, res) => {
+// POST /api/proxy/ryo/compare_tokens — accepts {symbols: ["SOL","0x…","WIF"]}
+// Each entry is resolved to its canonical identity first, then analyzed.
+router.post('/compare_tokens', resolveCaInList, async (req, res) => {
   const start = Date.now()
   const { symbols } = req.body
   if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
@@ -183,27 +206,29 @@ router.post('/compare_tokens', async (req, res) => {
     return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
   }
 
+  const identities = req.tokenIdentities || symbols.map((s) => ({ symbol: s, live: null }))
+
   try {
-    const cacheKey = `ryo:compare:${symbols.join(',').toLowerCase()}`
+    const cacheKey = `ryo:compare:${identities.map((i) => (i.ca || i.symbol).toLowerCase()).join(',')}`
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/compare_tokens', 200, Date.now() - start, '(cached)')
       return res.json(cached)
     }
 
-    // Call analyze_token for each symbol (each call is cached individually)
-    const analyses = await Promise.all(
-      symbols.slice(0, 4).map(async (sym) => {
+    // Call analyze_token per symbol; identities[] stays index-aligned with results.
+    const paired = await Promise.all(
+      identities.slice(0, 4).map(async (identity) => {
         try {
-          return await callRyoTool('analyze_token', { symbol: sym.toUpperCase() })
+          return { identity, raw: await callRyoTool('analyze_token', { symbol: identity.symbol.toUpperCase() }) }
         } catch {
           return null
         }
       })
     )
 
-    const valid = analyses.filter(Boolean)
-    const data = normalizeCompare(valid)
+    const valid = paired.filter(Boolean)
+    const data = normalizeCompare(valid.map((p) => p.raw), valid.map((p) => p.identity))
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/compare_tokens', 200, Date.now() - start)
     res.json(data)
@@ -255,7 +280,7 @@ router.post('/narrative', async (req, res) => {
   }
 
   try {
-    const cacheKey = `ryo:narrative:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:narrative')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/narrative', 200, Date.now() - start, '(cached)')
@@ -266,9 +291,10 @@ router.post('/narrative', async (req, res) => {
     const data = await discoverKols(symbol)
     data.symbol = symbol.toUpperCase()
 
-    setCache(cacheKey, data, 5 * 60 * 1000)
+    const out = withLiveIdentity(data, req.tokenIdentity)
+    setCache(cacheKey, out, 5 * 60 * 1000)
     log('POST', '/ryo/narrative', 200, Date.now() - start)
-    res.json(data)
+    res.json(out)
   } catch (err) {
     error('narrative', err)
     res.status(500).json({ error: err.message })
@@ -288,7 +314,7 @@ router.post('/risk', async (req, res) => {
   }
 
   try {
-    const cacheKey = `ryo:risk:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:risk')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/risk', 200, Date.now() - start, '(cached)')
@@ -296,7 +322,7 @@ router.post('/risk', async (req, res) => {
     }
 
     const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeRiskDesk(raw, limits)
+    const data = withLiveIdentity(normalizeRiskDesk(raw, limits, req.tokenIdentity), req.tokenIdentity)
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/risk', 200, Date.now() - start)
     res.json(data)
@@ -319,7 +345,7 @@ router.post('/debate', async (req, res) => {
   }
 
   try {
-    const cacheKey = `ryo:debate:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:debate')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/debate', 200, Date.now() - start, '(cached)')
@@ -327,7 +353,7 @@ router.post('/debate', async (req, res) => {
     }
 
     const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeDebate(raw)
+    const data = withLiveIdentity(normalizeDebate(raw), req.tokenIdentity)
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/debate', 200, Date.now() - start)
     res.json(data)
@@ -350,7 +376,7 @@ router.post('/script', async (req, res) => {
   }
 
   try {
-    const cacheKey = `ryo:script:${symbol.toLowerCase()}`
+    const cacheKey = idKey(req, 'ryo:script')
     const cached = getCache(cacheKey)
     if (cached) {
       log('POST', '/ryo/script', 200, Date.now() - start, '(cached)')
@@ -359,7 +385,7 @@ router.post('/script', async (req, res) => {
 
     const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
     const { normalizeStudioScript } = await import('../lib/normalizers.js')
-    const data = normalizeStudioScript(raw)
+    const data = withLiveIdentity(normalizeStudioScript(raw), req.tokenIdentity)
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/script', 200, Date.now() - start)
     res.json(data)

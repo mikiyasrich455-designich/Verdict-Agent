@@ -21,7 +21,7 @@ async function handleResolve(method, getPath, q, req, res) {
     res.json(data)
   } catch (err) {
     const msg = String(err.message || '')
-    const upstream = /DexScreener HTTP|aborted|network|socket|fetch failed|ETIMEDOUT|ECONNRESET/i.test(msg)
+    const upstream = /HTTP 5\d\d|HTTP 429|aborted|ETIMEDOUT|ECONNRESET|socket|fetch failed|network/i.test(msg)
     error('resolve', err)
     res.status(upstream ? 502 : 404).json({
       error: upstream

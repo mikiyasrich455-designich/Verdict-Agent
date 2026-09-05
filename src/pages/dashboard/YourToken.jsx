@@ -7,6 +7,7 @@ import { Sparkles, ArrowRight, Crosshair } from 'lucide-react'
 import TokenSearch from '../../components/TokenSearch'
 import { PageHeader } from '../../components/DashUI'
 import { resolveTokenInput } from '../../components/DashboardShell'
+import { setActiveToken, getActiveToken, identityFromParams, tokenHref } from '../../lib/activeToken'
 
 const WORDS = ['Bitcoin', 'Ethereum', 'Solana', 'every token', 'every chain', 'every narrative']
 
@@ -41,16 +42,18 @@ export default function YourToken() {
     setResolveErr('')
     setResolving(true)
     try {
-      const symbol = await resolveTokenInput(input)
+      const identity = await resolveTokenInput(input)
+      setActiveToken(identity)
       setResolving(false)
-      navigate(`/dashboard/analysis?token=${symbol}`)
+      navigate(tokenHref('/dashboard/analysis', identity))
     } catch (err) {
       setResolving(false)
       setResolveErr(err.message || 'Could not resolve that token')
     }
   }
 
-  const tokenPath = (to) => (token ? `${to}?token=${token}` : to)
+  const tokenPath = (to) =>
+    tokenHref(to, identityFromParams(searchParams) || getActiveToken() || (token ? { symbol: token } : null))
 
   return (
     <>
