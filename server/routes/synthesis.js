@@ -6,10 +6,10 @@ import { log, error } from '../lib/logger.js'
 import {
   normalizeVerdict,
   normalizeDebate,
-  normalizeNarrative,
   normalizeRiskDesk,
   unwrapRyo,
 } from '../lib/normalizers.js'
+import { discoverKols } from '../lib/kolDiscovery.js'
 
 const router = Router()
 
@@ -105,8 +105,15 @@ async function deepAnalyze(symbol) {
         }))
       )
       for (const r of results) {
-        if (r.status === 'fulfilled' && r.value?.data?.results) {
-          allResults.push(...r.value.data.results.slice(0, 5))
+        // AceData SERP returns { organic: [...] } (top level) or { data: { organic: [...] } }
+      const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
+        if (organic && Array.isArray(organic)) {
+          allResults.push(...organic.slice(0, 5).map(item => ({
+            title: item.title || '',
+            url: item.link || '',
+            snippet: item.snippet || '',
+            position: item.position || 0
+          })))
         }
       }
       return allResults.slice(0, 15)
@@ -420,7 +427,7 @@ router.post('/debate', async (req, res) => {
   }
 })
 
-// POST /api/proxy/synthesis/narrative → RYO analyze → narrative shape
+// POST /api/proxy/synthesis/narrative → Real KOL discovery via SERP + Grok
 router.post('/narrative', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -440,8 +447,9 @@ router.post('/narrative', async (req, res) => {
       return res.json(cached)
     }
 
-    const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeNarrative(raw, symbol)
+    // Use real KOL discovery instead of fake normalizeNarrative
+    const data = await discoverKols(symbol)
+    data.symbol = symbol.toUpperCase()
 
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/synthesis/narrative', 200, Date.now() - start)

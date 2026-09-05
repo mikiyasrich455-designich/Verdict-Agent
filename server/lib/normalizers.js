@@ -397,55 +397,6 @@ export function normalizeSentimentShift(ryoRaw) {
   return { series, delta, direction, now, weekAgo }
 }
 
-// ── Narrative shape ─────────────────────────────────────────────
-export function normalizeNarrative(ryoRaw, fallbackSymbol) {
-  const d = unwrapRyo(ryoRaw)
-  const asset = d.asset || {}
-  const intel = d.intelligence || {}
-  const symbol = (asset.symbol || fallbackSymbol || 'UNKNOWN').toUpperCase()
-
-  const catalysts = intel.catalysts || []
-  const risks = intel.risks || []
-
-  const kolHandles = ['@chainwhisper', '@alpharunner', '@onchaindove', '@chartmonk', '@degensage', '@liquiditylens', '@blockprophet', '@signalkeeper']
-  const kols = kolHandles.map((handle, i) => {
-    const isBull = i < Math.ceil(kolHandles.length * 0.5)
-    const stance = isBull ? 'bullish' : (i % 3 === 0 ? 'neutral' : 'bearish')
-    return {
-      handle,
-      followers: `${100 + i * 47}K`,
-      stance,
-      conviction: 55 + ((i * 13) % 40),
-      urgency: i % 3 === 0 ? 'high' : i % 3 === 1 ? 'medium' : 'low',
-      lastSeen: `${1 + i * 2}h ago`,
-      quote: stance === 'bullish'
-        ? `${symbol} structure is clean. ${intel.narrative || 'Accumulation visible on-chain.'}`
-        : stance === 'bearish'
-          ? `${symbol} is distributing into strength. ${risks[0] || 'Reducing exposure here.'}`
-          : `Watching ${symbol} from the sidelines until volume confirms direction.`,
-    }
-  })
-
-  const bullish = kols.filter(k => k.stance === 'bullish').length
-  const converged = bullish >= Math.ceil(kols.length / 2)
-
-  const news = catalysts.slice(0, 3).map((c, i) => ({
-    title: typeof c === 'string' ? c : (c.title || c.event || `${symbol} ecosystem update`),
-    source: ['The Block', 'Glassnode', 'X / KOL feed'][i % 3],
-    age: `${1 + i * 3}h`,
-    stamp: i === 0 ? 'VERIFIED' : i === 1 ? 'VERIFIED' : 'UNVERIFIED',
-  }))
-
-  return {
-    symbol,
-    kols,
-    bullish,
-    total: kols.length,
-    converged,
-    news: news.length ? news : [{ title: `${intel.narrative || symbol + ' narrative developing'}`, source: 'RYO Intelligence', age: 'now', stamp: 'VERIFIED' }],
-  }
-}
-
 // ── Risk desk shape ─────────────────────────────────────────────
 export function normalizeRiskDesk(ryoRaw, limits = { maxPosition: 5, stopLoss: 8, minConviction: 60 }) {
   const v = normalizeVerdict(ryoRaw)

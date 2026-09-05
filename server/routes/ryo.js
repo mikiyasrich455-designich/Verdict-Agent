@@ -9,11 +9,11 @@ import {
   normalizeProfile,
   normalizeCompare,
   normalizeSentimentShift,
-  normalizeNarrative,
   normalizeRiskDesk,
   normalizeDebate,
   normalizeVerdict as normalizeVerdictFromRaw,
 } from '../lib/normalizers.js'
+import { discoverKols } from '../lib/kolDiscovery.js'
 
 const router = Router()
 
@@ -238,7 +238,7 @@ router.post('/sentiment_shift', async (req, res) => {
   }
 })
 
-// POST /api/proxy/ryo/narrative — RYO analyze_token → normalized narrative
+// POST /api/proxy/ryo/narrative — Real KOL discovery via SERP + Grok
 router.post('/narrative', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -258,8 +258,10 @@ router.post('/narrative', async (req, res) => {
       return res.json(cached)
     }
 
-    const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
-    const data = normalizeNarrative(raw, symbol)
+    // Use real KOL discovery instead of mock normalizeNarrative
+    const data = await discoverKols(symbol)
+    data.symbol = symbol.toUpperCase()
+
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/narrative', 200, Date.now() - start)
     res.json(data)
