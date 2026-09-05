@@ -13,9 +13,11 @@ import {
   dexPairsByCa,
   dexSearch,
   gtTokenDetail,
+  gtTokenInfo,
   gtSearchPools,
   gtPool,
   gtOhlcv,
+  pumpCoin,
   cgCoin,
   cgCoinByCa,
   cgMarketChart,
@@ -303,6 +305,101 @@ async function geckoFallback(ca) {
   }
 }
 
+// ── Per-chain token record — answers when the cross-chain search is throttled ─
+// Address shape narrows which ledgers are worth probing.
+function chainsToProbe(ca) {
+  if (EVM_CA_RE.test(String(ca))) return ['ethereum', 'base', 'bsc', 'polygon', 'arbitrum', 'optimism', 'avalanche']
+  if (BASE58_CA_RE.test(String(ca))) return ['solana']
+  return []
+}
+
+async function gtTokenProfile(ca) {
+  for (const chain of chainsToProbe(ca)) {
+    const detail = await gtTokenDetail(chain, ca)
+    const a = detail?.data?.attributes
+    if (!a || (!a.name && !a.symbol)) continue
+
+    const info = (await gtTokenInfo(chain, ca))?.data?.attributes || {}
+    const pools = (Array.isArray(detail.included) ? detail.included : []).filter((p) => p?.type === 'pool')
+    const deepest = pools.sort(
+      (x, y) => num(y?.attributes?.reserve_in_usd) - num(x?.attributes?.reserve_in_usd)
+    )[0]
+    const pa = deepest?.attributes || {}
+    const websites = (info.websites || []).filter(Boolean)
+    const socials = []
+    if (info.twitter_handle) socials.push({ type: 'twitter', url: `https://x.com/${info.twitter_handle}` })
+    if (info.telegram_handle) socials.push({ type: 'telegram', url: `https://t.me/${info.telegram_handle}` })
+    if (info.discord_url) socials.push({ type: 'discord', url: info.discord_url })
+
+    return {
+      symbol: cleanSymbol(a.symbol) || 'UNKNOWN',
+      name: a.name || a.symbol || 'Unknown',
+      chain,
+      chainLabel: chainLabel(chain),
+      ca,
+      isCA: true,
+      decimals: Number.isFinite(Number(a.decimals)) ? Number(a.decimals) : null,
+      priceUsd: num(a.price_usd),
+      marketCap: num(a.market_cap_usd) || num(a.fdv_usd),
+      fdv: num(a.fdv_usd),
+      volume24h: num(a.volume_usd?.h24),
+      liquidityUsd: num(a.total_reserve_in_usd),
+      totalSupply: num(a.normalized_total_supply),
+      exchange: prettyDex(deepest?.relationships?.dex?.data?.id),
+      exchangeId: deepest?.relationships?.dex?.data?.id || null,
+      pairName: pa.name || null,
+      pairAddress: pa.address || null,
+      poolAddress: pa.address || null,
+      pairCreatedAt: pa.pool_created_at ? Date.parse(pa.pool_created_at) : null,
+      logo: a.image_url || null,
+      banner: a.banner_image_url || null,
+      cgCoinId: a.coingecko_coin_id || null,
+      description: (info.description || '').replace(/\s*\n\s*/g, ' ').trim() || null,
+      websites: websites.slice(0, 4),
+      whitepaper: websites.find((u) => /whitepaper|pdf/i.test(u)) || null,
+      socials,
+      categories: [],
+      resolved: true,
+      matchType: 'contract_geckoterminal',
+    }
+  }
+  return null
+}
+
+// ── pump.fun mints: the launchpad that issued the address always knows it ─────
+async function pumpFunProfile(ca) {
+  const coin = await pumpCoin(ca)
+  if (!coin || (!coin.name && !coin.symbol)) return null
+  const socials = []
+  if (coin.twitter) socials.push({ type: 'twitter', url: coin.twitter })
+  if (coin.telegram) socials.push({ type: 'telegram', url: coin.telegram })
+  return {
+    symbol: cleanSymbol(coin.symbol) || 'UNKNOWN',
+    name: coin.name || coin.symbol || 'Unknown',
+    chain: 'solana',
+    chainLabel: chainLabel('solana'),
+    ca,
+    isCA: true,
+    decimals: Number.isFinite(Number(coin.decimals)) ? Number(coin.decimals) : 6,
+    priceUsd: num(coin.usd_market_cap) && num(coin.total_supply) ? num(coin.usd_market_cap) / num(coin.total_supply) : 0,
+    marketCap: num(coin.usd_market_cap),
+    totalSupply: num(coin.total_supply),
+    exchange: coin.raydium_pool ? 'Raydium' : 'pump.fun bonding curve',
+    pairAddress: coin.pool_address || coin.market_id || null,
+    poolAddress: coin.pool_address || coin.market_id || null,
+    pairCreatedAt: num(coin.created_timestamp) || null,
+    logo: coin.image_uri || null,
+    banner: null,
+    description: (coin.description || '').replace(/\s*\n\s*/g, ' ').trim() || null,
+    websites: coin.website ? [coin.website] : [],
+    socials,
+    categories: [],
+    ath: num(coin.ath_market_cap) || undefined,
+    resolved: true,
+    matchType: 'contract_pumpfun',
+  }
+}
+
 // ── CoinGecko: the "info thing" — what the project actually is ───────────────
 async function applyCoinGecko(profile) {
   let coin = profile.cgCoinId ? await cgCoin(profile.cgCoinId) : null
@@ -521,6 +618,15 @@ export async function resolveToken(rawInput) {
     const fallback = await geckoFallback(ca)
     if (fallback) {
       const out = await hydrate(fallback, [])
+      setCache(cacheKey, out, 5 * 60 * 1000)
+      return out
+    }
+
+    // Both indexers went quiet (they throttle shared cloud ranges hard). The
+    // per-chain token record, then the launchpad that minted it, still answer.
+    const record = (await gtTokenProfile(ca)) || (await pumpFunProfile(ca))
+    if (record) {
+      const out = await hydrate(record, [])
       setCache(cacheKey, out, 5 * 60 * 1000)
       return out
     }

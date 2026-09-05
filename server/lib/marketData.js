@@ -199,6 +199,17 @@ export function dexSearch(query) {
   )
 }
 
+// ── pump.fun — the launchpad that minted the token still answers when the
+// market indexers (correctly) don't know the mint yet. ───────────
+export function pumpCoin(mint) {
+  const id = String(mint || '')
+  if (!/pump$/i.test(id)) return Promise.resolve(null)
+  return attempt(
+    () => httpJson(`https://frontend-api-v3.pump.fun/coins/${encodeURIComponent(id)}`, 9000),
+    `pump.fun ${id}`
+  )
+}
+
 // ── GeckoTerminal ───────────────────────────────────────────────
 export function gtTokenDetail(chain, ca) {
   const net = gtNetwork(chain)
@@ -206,6 +217,17 @@ export function gtTokenDetail(chain, ca) {
   return attempt(
     () => httpJson(`${GT_BASE}/networks/${net}/tokens/${encodeURIComponent(ca)}?include=top_pools&currency=usd`),
     `geckoterminal token ${net}/${ca}`
+  )
+}
+
+// The token record's "info" sibling carries the project copy the detail endpoint
+// omits: description, websites and social handles.
+export function gtTokenInfo(chain, ca) {
+  const net = gtNetwork(chain)
+  if (!net || !ca) return Promise.resolve(null)
+  return attempt(
+    () => httpJson(`${GT_BASE}/networks/${net}/tokens/${encodeURIComponent(ca)}/info`),
+    `geckoterminal token info ${net}/${ca}`
   )
 }
 

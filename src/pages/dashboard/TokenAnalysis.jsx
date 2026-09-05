@@ -165,6 +165,7 @@ const MATCH_LABEL = {
   contract: 'contract address',
   contract_dexscreener: 'contract address',
   contract_geckoterminal: 'contract address',
+  contract_pumpfun: 'contract address',
   ticker: 'ticker symbol',
   ticker_unverified: 'ticker symbol · unverified',
   name: 'token name',
