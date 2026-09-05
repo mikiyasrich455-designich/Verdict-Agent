@@ -74,7 +74,8 @@ function VideoStudioInner({ token, pick }) {
     }
   }
 
-  const download = (item) => downloadDataUrl(item.poster, `verdict-${item.symbol.toLowerCase()}-poster.svg`)
+  const download = (item) =>
+    downloadDataUrl(item.videoUrl || item.poster, `verdict-${item.symbol.toLowerCase()}-clip.${item.format || 'mp4'}`)
 
   return (
     <>

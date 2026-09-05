@@ -227,6 +227,49 @@ function extractVideoUrls(payload) {
   return { videoUrl: mp4 ? mp4[0] : null, posterUrl: cover ? cover[0] : null }
 }
 
+// Seedance async tasks report bad parameters (e.g. an unsupported model) in the
+// *poll* response, not the submit response — so the old "retry next model on !ok"
+// logic never fired and the render died silently. Poll once right after submitting
+// and walk down this list until a model is actually accepted.
+const VIDEO_MODELS = [
+  { id: 'doubao-seedance-2-0-mini-260615', maxDuration: 15 },
+  { id: 'doubao-seedance-2-0-fast-260128', maxDuration: 15 },
+  { id: 'doubao-seedance-1-0-pro-fast-251015', maxDuration: 12 },
+]
+
+// One upstream query. Returns { status, videoUrl, posterUrl, error } where
+// status is 'unknown' while the task is still queued or rendering.
+async function pollTask(taskId) {
+  const pollRes = await fetch(`${process.env.ACEDATA_BASE}/seedance/tasks`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${process.env.ACEDATA_KEY}`,
+    },
+    body: JSON.stringify({ id: taskId, action: 'retrieve' }),
+    signal: AbortSignal.timeout(15000),
+  })
+
+  if (!pollRes.ok) return { httpStatus: pollRes.status, status: 'unknown' }
+
+  const data = await pollRes.json()
+  // While the task is queued/rendering the upstream sends back only the task record
+  // (no `response` field yet) — that is NOT a terminal state, so report it as running.
+  // When it finishes: { response: { success, error?, data: { status, video_url, last_frame_url } } }
+  const inner = data.response?.data || data.data || {}
+  const status = data.response
+    ? String(inner.status || data.status || 'running').toLowerCase()
+    : String(data.status || 'running').toLowerCase()
+  const { videoUrl, posterUrl } = extractVideoUrls(inner)
+
+  const upstreamError = data.response?.success === false ? data.response?.error || data.error : null
+  const failed = Boolean(upstreamError) || ['failed', 'error', 'cancelled', 'expired'].includes(status)
+  const message = upstreamError?.message || inner?.error?.message || data.message || `status ${status}`
+
+  return { status, videoUrl, posterUrl, failed, message }
+}
+
 router.post('/video', async (req, res) => {
   const start = Date.now()
   const { prompt, duration = 5, resolution = '720p', ratio = '16:9' } = req.body
@@ -245,6 +288,10 @@ router.post('/video', async (req, res) => {
       'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
     }
 
+    // callback_url switches Seedance to ASYNC mode: without it the upstream holds the
+    // HTTP connection open for the whole 1-2 min render, which blows past Render's
+    // request timeout and leaves the client spinning. The callback target is a
+    // throwaway sink — we poll /video/status ourselves.
     const submitBody = (model, maxDur) => ({
       model,
       content: [{ type: 'text', text: prompt }],
@@ -252,104 +299,103 @@ router.post('/video', async (req, res) => {
       ratio,
       duration: Math.min(duration, maxDur),
       generate_audio: true,
+      callback_url: process.env.ACEDATA_CALLBACK_URL || 'https://api.acedata.cloud/health',
     })
 
-    // Try cheapest model first: 1.0 Lite T2V (2-12s), fallback 2.0 Mini (4-15s)
-    let fetchRes = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(submitBody('doubao-seedance-1-0-lite-t2v-250428', 12)),
-    })
-
-    let firstStatus = fetchRes.status
-    let firstText = ''
-    if (!fetchRes.ok) {
-      firstText = await fetchRes.text()
-      console.log('[VIDEO] 1.0 Lite failed, trying 2.0 Mini:', firstStatus, firstText)
-
-      fetchRes = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(submitBody('doubao-seedance-2-0-mini-260615', 15)),
-      })
+    let lastProblem = null
+    for (const model of VIDEO_MODELS) {
+      let fetchRes
+      try {
+        // NOTE: node-fetch v3 ignores the old `timeout` option — must use AbortSignal.
+        fetchRes = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(submitBody(model.id, model.maxDuration)),
+          signal: AbortSignal.timeout(20000),
+        })
+      } catch (err) {
+        lastProblem = `${model.id}: ${err.name === 'TimeoutError' ? 'submit timed out' : err.message}`
+        continue
+      }
 
       if (!fetchRes.ok) {
-        const text2 = await fetchRes.text()
-        throw new Error(`Video submit failed (1.0 Lite: ${firstStatus} ${firstText.slice(0, 120)} | 2.0 Mini: ${fetchRes.status} ${text2.slice(0, 120)})`)
+        const text = await fetchRes.text().catch(() => '')
+        lastProblem = `${model.id}: HTTP ${fetchRes.status} ${text.slice(0, 140)}`
+        console.log('[VIDEO] submit rejected', lastProblem)
+        continue
       }
-    }
 
-    const data = await fetchRes.json()
+      const data = await fetchRes.json()
+      const taskId = data.id || data.task_id || data.data?.task_id || data.data?.id
 
-    // Task-based response → hand the id to the client, it polls /video/status
-    const taskId = data.id || data.task_id || data.data?.task_id || data.data?.id
-    if (taskId) {
-      console.log('[VIDEO] Task created:', taskId)
-      log('POST', '/acedata/video', 200, Date.now() - start, '(queued)')
+      if (!taskId) {
+        // Direct response (already rendered) — no polling needed.
+        const { videoUrl, posterUrl } = extractVideoUrls(data)
+        if (videoUrl) {
+          log('POST', '/acedata/video', 200, Date.now() - start, '(direct)')
+          return res.json({ queued: false, done: true, videoUrl, posterUrl })
+        }
+        lastProblem = `${model.id}: no task id in response`
+        continue
+      }
+
+      // Catch parameters-only-upstream before handing the task to the browser.
+      await new Promise((r) => setTimeout(r, 900))
+      const check = await pollTask(taskId).catch(() => null)
+      if (check?.failed) {
+        lastProblem = `${model.id}: ${check.message}`
+        console.log('[VIDEO] task failed immediately', lastProblem)
+        // Only a parameter rejection is worth retrying; quota/auth errors are not.
+        if (!/not supported|invalid|parameter|resolution|duration/i.test(check.message || '')) {
+          return res.status(400).json({ error: `Video render rejected: ${check.message}` })
+        }
+        continue
+      }
+
+      console.log('[VIDEO] Task created:', taskId, 'with', model.id)
+      log('POST', '/acedata/video', 200, Date.now() - start, `(queued ${model.id})`)
       return res.json({ queued: true, task_id: taskId })
     }
 
-    // Direct response (already rendered)
-    const { videoUrl, posterUrl } = extractVideoUrls(data)
-    log('POST', '/acedata/video', 200, Date.now() - start, '(direct)')
-    res.json({ queued: false, done: true, videoUrl, posterUrl, raw: data })
+    throw new Error(`Video submit failed — ${lastProblem || 'no Seedance model accepted the request'}`)
   } catch (err) {
     error('video', err)
     res.status(502).json({ error: err.message })
   }
 })
 
-// GET /api/proxy/acedata/video/status/:taskId — single upstream poll, returns fast
-// AceData queries async tasks with POST /seedance/tasks { id, action: "retrieve" }
-// (a GET on /seedance/tasks/:id 404s — that was the "video keeps loading" bug).
+// GET /api/proxy/acedata/video/status/:taskId — single upstream poll, returns fast.
+// AceData queries async tasks with POST /seedance/tasks { id, action: "retrieve" };
+// a GET on /seedance/tasks/:id 404s, which is why every poll used to come back empty.
 router.get('/video/status/:taskId', async (req, res) => {
   const start = Date.now()
   const taskId = String(req.params.taskId || '').replace(/[^A-Za-z0-9_-]/g, '')
   if (!taskId) return res.status(400).json({ error: 'taskId required' })
 
   try {
-    const pollRes = await fetch(`${process.env.ACEDATA_BASE}/seedance/tasks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${process.env.ACEDATA_KEY}`,
-      },
-      body: JSON.stringify({ id: taskId, action: 'retrieve' }),
-      timeout: 15000,
-    })
+    const poll = await pollTask(taskId)
 
-    if (!pollRes.ok) {
-      const text = await pollRes.text()
-      console.log('[VIDEO] poll HTTP', pollRes.status, text.slice(0, 160))
-      if (pollRes.status === 404) {
-        return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
-      }
+    if (poll.httpStatus === 404) {
+      return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
+    }
+    if (poll.httpStatus) {
       // Transient upstream hiccups shouldn't kill the client poll loop
-      return res.json({ done: false, status: `poll_${pollRes.status}` })
+      return res.json({ done: false, status: `poll_${poll.httpStatus}` })
     }
 
-    const data = await pollRes.json()
-    // Shape: { id, status?, response: { success, data: { status, video_url, last_frame_url } } }
-    const inner = data.response?.data || data.data || data
-    const status = String(inner.status || data.status || 'unknown').toLowerCase()
-    const { videoUrl, posterUrl } = extractVideoUrls(inner)
-
-    const upstreamError = data.response?.success === false ? data.response?.error || data.error : null
-    const failed = Boolean(upstreamError) || ['failed', 'error', 'cancelled', 'expired'].includes(status)
-    if (videoUrl || failed) {
-      log('GET', '/acedata/video/status', 200, Date.now() - start, `(${videoUrl ? 'done' : 'failed'})`)
+    if (poll.videoUrl || poll.failed) {
+      log('GET', '/acedata/video/status', 200, Date.now() - start, `(${poll.videoUrl ? 'done' : 'failed'})`)
       return res.json({
         done: true,
-        videoUrl,
-        posterUrl,
-        status,
-        error: failed ? `Render failed (${status}): ${upstreamError?.message || inner?.error?.message || data.message || 'see status'}` : null,
+        videoUrl: poll.videoUrl,
+        posterUrl: poll.posterUrl,
+        status: poll.status,
+        error: poll.failed && !poll.videoUrl ? `Render failed (${poll.status}): ${poll.message}` : null,
       })
     }
 
-    log('GET', '/acedata/video/status', 200, Date.now() - start, `(${status})`)
-    res.json({ done: false, status, videoUrl: null, posterUrl: null })
+    log('GET', '/acedata/video/status', 200, Date.now() - start, `(${poll.status})`)
+    res.json({ done: false, status: poll.status, videoUrl: null, posterUrl: null })
   } catch (err) {
     error('video/status', err)
     res.json({ done: false, status: 'poll_error' })
