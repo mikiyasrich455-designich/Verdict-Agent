@@ -1,11 +1,13 @@
-import { rateLimit } from '../../api/lib/rateLimit.js'
-import { getCache, setCache } from '../../api/lib/cache.js'
-import { log, error } from '../../api/lib/logger.js'
+import { rateLimit } from '../../lib/rateLimit.js'
+import { getCache, setCache } from '../../lib/cache.js'
+import { log, error } from '../../lib/logger.js'
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
-  }
+  // CORS headers for cross-origin requests
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+  if (req.method === 'OPTIONS') return res.status(204).end()
 
   const start = Date.now()
 
