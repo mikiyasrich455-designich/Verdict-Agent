@@ -307,14 +307,18 @@ async function geckoFallback(ca) {
 
 // ── Per-chain token record — answers when the cross-chain search is throttled ─
 // Address shape narrows which ledgers are worth probing.
-function chainsToProbe(ca) {
-  if (EVM_CA_RE.test(String(ca))) return ['ethereum', 'base', 'bsc', 'polygon', 'arbitrum', 'optimism', 'avalanche']
-  if (BASE58_CA_RE.test(String(ca))) return ['solana']
-  return []
+function chainsToProbe(ca, preferred) {
+  const rest = EVM_CA_RE.test(String(ca))
+    ? ['ethereum', 'base', 'bsc', 'polygon', 'arbitrum', 'optimism', 'avalanche']
+    : BASE58_CA_RE.test(String(ca))
+      ? ['solana']
+      : []
+  if (preferred && !rest.includes(preferred)) return [preferred, ...rest]
+  return preferred ? [preferred, ...rest.filter((c) => c !== preferred)] : rest
 }
 
-async function gtTokenProfile(ca) {
-  for (const chain of chainsToProbe(ca)) {
+async function gtTokenProfile(ca, preferredChain) {
+  for (const chain of chainsToProbe(ca, preferredChain)) {
     const detail = await gtTokenDetail(chain, ca)
     const a = detail?.data?.attributes
     if (!a || (!a.name && !a.symbol)) continue
@@ -340,6 +344,7 @@ async function gtTokenProfile(ca) {
       isCA: true,
       decimals: Number.isFinite(Number(a.decimals)) ? Number(a.decimals) : null,
       priceUsd: num(a.price_usd),
+      change24h: num(pa.price_change_percentage?.h24),
       marketCap: num(a.market_cap_usd) || num(a.fdv_usd),
       fdv: num(a.fdv_usd),
       volume24h: num(a.volume_usd?.h24),
@@ -351,6 +356,8 @@ async function gtTokenProfile(ca) {
       pairAddress: pa.address || null,
       poolAddress: pa.address || null,
       pairCreatedAt: pa.pool_created_at ? Date.parse(pa.pool_created_at) : null,
+      buys24h: num(pa.transactions?.h24?.buys),
+      sells24h: num(pa.transactions?.h24?.sells),
       logo: a.image_url || null,
       banner: a.banner_image_url || null,
       cgCoinId: a.coingecko_coin_id || null,
@@ -364,6 +371,26 @@ async function gtTokenProfile(ca) {
     }
   }
   return null
+}
+
+// ── Deepen a pair-search hit ─────────────────────────────────────────────────
+// A pool search only returns pair rows, so a token found that way arrives with no
+// artwork, no copy and sometimes not even a real project name. The token record for
+// the chain we just discovered carries all of it — one extra call fills the blanks.
+const DEEP_FIELDS = [
+  'name', 'symbol', 'decimals', 'logo', 'banner', 'description', 'websites', 'socials',
+  'whitepaper', 'cgCoinId', 'totalSupply', 'marketCap', 'fdv', 'volume24h', 'liquidityUsd',
+  'priceUsd', 'change24h', 'buys24h', 'sells24h', 'exchange', 'pairName', 'pairAddress',
+  'poolAddress', 'pairCreatedAt',
+]
+
+async function deepenFromTokenRecord(record) {
+  const rich = await gtTokenProfile(record.ca, record.chain)
+  if (!rich) return record
+  for (const field of DEEP_FIELDS) {
+    if (isBlank(record[field]) && !isBlank(rich[field])) record[field] = rich[field]
+  }
+  return record
 }
 
 // ── pump.fun mints: the launchpad that issued the address always knows it ─────
@@ -617,7 +644,11 @@ export async function resolveToken(rawInput) {
     // DexScreener doesn't index every venue — ask GeckoTerminal directly.
     const fallback = await geckoFallback(ca)
     if (fallback) {
-      const out = await hydrate(fallback, [])
+      const deep =
+        fallback.logo && fallback.description
+          ? fallback
+          : await deepenFromTokenRecord(fallback)
+      const out = await hydrate(deep, [])
       setCache(cacheKey, out, 5 * 60 * 1000)
       return out
     }
