@@ -158,85 +158,82 @@ ON-CHAIN INTELLIGENCE:
 LATEST NEWS & MARKET SENTIMENT (from live search):
 ${serpText}
 
-YOUR TASK — Provide a COMPREHENSIVE forensic analysis with:
+YOUR TASK — Respond with ONLY a single valid JSON object (no markdown, no code fences, no prose before or after) using EXACTLY these keys:
 
-1. VERDICT: BUY / HOLD / AVOID (must be one of these)
-2. CONFIDENCE: 0-100 (how strong is your conviction?)
-3. OVERALL SUMMARY: 3-4 sentences in plain English, no jargon, explaining the thesis
-4. FIVE PILLAR SCORES (0-100 each) with DETAILED reasoning:
-   - technical: Technical analysis score + reasoning (2-3 sentences)
-   - market: Market context score + reasoning (2-3 sentences)
-   - risk: Risk assessment score + reasoning (2-3 sentences)
-   - catalyst: Catalyst density score + reasoning (2-3 sentences)
-   - sentiment: Market sentiment score + reasoning (2-3 sentences)
-5. BULL CASE: 3-5 specific reasons with evidence
-6. BEAR CASE: 3-5 specific reasons with evidence
-7. KEY LEVELS: Support, resistance, stop-loss, target prices if applicable
-8. FINAL THESIS: 2-3 sentence conclusion summarizing the investment case
+{
+  "verdict": "BUY" | "HOLD" | "AVOID",
+  "confidence": <0-100 integer>,
+  "bullScore": <0-100 integer>,
+  "bearScore": <0-100 integer>,
+  "summary": "<3-4 sentences plain-English thesis>",
+  "bullReasons": ["<reason 1>", "<reason 2>", "<reason 3>"],
+  "bearReasons": ["<reason 1>", "<reason 2>", "<reason 3>"],
+  "technical": { "score": <0-100>, "reasoning": "<2-3 sentences>" },
+  "market":    { "score": <0-100>, "reasoning": "<2-3 sentences>" },
+  "risk":      { "score": <0-100>, "reasoning": "<2-3 sentences>" },
+  "catalyst":  { "score": <0-100>, "reasoning": "<2-3 sentences>" },
+  "sentiment": { "score": <0-100>, "reasoning": "<2-3 sentences>" },
+  "keyLevels": { "support": "<value>", "resistance": "<value>", "stopLoss": "<value>", "target": "<value>" },
+  "finalThesis": "<2-3 sentence conclusion>"
+}
 
 IMPORTANT RULES:
-- Be specific. Use actual numbers, dates, events from the data.
-- Don't hedge. Give a clear verdict with conviction.
-- If data is insufficient, say so and base analysis on available evidence.
-- Bull score + Bear score should roughly equal 100 (±15 allowed)
-- Verdict must match: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD
-- All reasoning must be grounded in the provided data (RYO + SERP results)`
+- Output MUST be valid JSON parseable by JSON.parse. Double-quote all keys and string values. No trailing commas. No comments.
+- Use the EXACT key names above (verdict, confidence, bullScore, bearScore, summary, bullReasons, bearReasons, technical, market, risk, catalyst, sentiment, keyLevels, finalThesis). Do NOT rename them.
+- bullReasons and bearReasons MUST each have 3-5 concrete, evidence-based strings (not empty).
+- Each pillar object MUST have both "score" (number) and "reasoning" (non-empty string).
+- Be specific. Use actual numbers, dates, events from the data. Don't hedge.
+- bullScore + bearScore ≈ 100 (±15). Verdict: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD.
+- Ground all reasoning in the provided RYO + SERP data.`
 
   // Call Grok for deep analysis
   console.log(`[DEEP] ${symbolUpper}: Calling Grok for analysis...`)
   const tGrokStart = Date.now()
-  const response = await callAceChat([
-    { role: 'system', content: 'You are a world-class crypto research analyst. Always respond with valid JSON. Be thorough, specific, and evidence-based.' },
+  let response = await callAceChat([
+    { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
     { role: 'user', content: prompt },
   ], 'grok-4', 4000)
+  let analysis = extractJson(response)
+
+  // Retry once if the model did not return parseable JSON
+  if (!analysis) {
+    console.log('[DEEP] Response was not valid JSON, retrying once...')
+    response = await callAceChat([
+      { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
+      { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
+    ], 'grok-4', 4000)
+    analysis = extractJson(response)
+  }
+  if (!analysis) {
+    throw new Error('Analysis response did not contain valid JSON')
+  }
   const grokTime = Date.now() - tGrokStart
   console.log(`[DEEP] ${symbolUpper}: Grok response received in ${grokTime}ms`)
 
-  // Parse JSON from response
-  const jsonMatch = response.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) {
-    throw new Error('Analysis response did not contain valid JSON')
-  }
-
-  const analysis = JSON.parse(jsonMatch[0])
-
-  // Validate and return
+  // Validate and return (accepts nested {score,reasoning} or flat xxxScore/xxxReasoning keys)
   return {
     symbol: symbolUpper,
     name: asset.name || symbolUpper,
     priceUsd: market.price_usd || 0,
     change24h: perf.change_24h_pct || 0,
-    bullScore: Math.max(0, Math.min(100, analysis.bullScore || 50)),
-    bearScore: Math.max(0, Math.min(100, analysis.bearScore || 50)),
-    verdict: ['BUY', 'HOLD', 'AVOID'].includes(analysis.verdict) ? analysis.verdict : 'HOLD',
-    confidence: Math.max(0, Math.min(100, analysis.confidence || 50)),
-    summary: analysis.summary || 'Analysis complete.',
-    bullReasons: Array.isArray(analysis.bullReasons) ? analysis.bullReasons.slice(0, 5) : [],
-    bearReasons: Array.isArray(analysis.bearReasons) ? analysis.bearReasons.slice(0, 5) : [],
+    bullScore: clampScore(firstNum(analysis.bullScore, analysis.bull_score)),
+    bearScore: clampScore(firstNum(analysis.bearScore, analysis.bear_score)),
+    verdict: ['BUY', 'HOLD', 'AVOID'].includes(String(analysis.verdict || '').toUpperCase())
+      ? String(analysis.verdict).toUpperCase()
+      : 'HOLD',
+    confidence: clampScore(firstNum(analysis.confidence)),
+    summary: analysis.summary || analysis.overview || analysis.overall_summary || 'Analysis complete.',
+    bullReasons: firstArr(analysis.bullReasons, analysis.bull_case, analysis.bull, analysis.bullPoints).slice(0, 5),
+    bearReasons: firstArr(analysis.bearReasons, analysis.bear_case, analysis.bear, analysis.bearPoints).slice(0, 5),
     scores: {
-      technical: {
-        score: Math.max(0, Math.min(100, analysis.technicalScore || 50)),
-        reasoning: analysis.technicalReasoning || analysis.technical?.reasoning || 'Technical analysis pending.',
-      },
-      market: {
-        score: Math.max(0, Math.min(100, analysis.marketScore || 50)),
-        reasoning: analysis.marketReasoning || analysis.market?.reasoning || 'Market context pending.',
-      },
-      risk: {
-        score: Math.max(0, Math.min(100, analysis.riskScore || 50)),
-        reasoning: analysis.riskReasoning || analysis.risk?.reasoning || 'Risk assessment pending.',
-      },
-      catalyst: {
-        score: Math.max(0, Math.min(100, analysis.catalystScore || 50)),
-        reasoning: analysis.catalystReasoning || analysis.catalyst?.reasoning || 'Catalyst analysis pending.',
-      },
-      sentiment: {
-        score: Math.max(0, Math.min(100, analysis.sentimentScore || 50)),
-        reasoning: analysis.sentimentReasoning || analysis.sentiment?.reasoning || 'Sentiment analysis pending.',
-      },
+      technical: pickPillar(analysis.technical, analysis.technicalScore, analysis.technicalReasoning, 'Technical analysis pending.'),
+      market: pickPillar(analysis.market, analysis.marketScore, analysis.marketReasoning, 'Market context pending.'),
+      risk: pickPillar(analysis.risk, analysis.riskScore, analysis.riskReasoning, 'Risk assessment pending.'),
+      catalyst: pickPillar(analysis.catalyst, analysis.catalystScore, analysis.catalystReasoning, 'Catalyst analysis pending.'),
+      sentiment: pickPillar(analysis.sentiment, analysis.sentimentScore, analysis.sentimentReasoning, 'Sentiment analysis pending.'),
     },
-    keyLevels: analysis.keyLevels || {},
-    finalThesis: analysis.finalThesis || analysis.conclusion || '',
+    keyLevels: analysis.keyLevels || analysis.key_levels || analysis.levels || {},
+    finalThesis: analysis.finalThesis || analysis.final_thesis || analysis.thesis || analysis.conclusion || '',
     asOf: new Date().toISOString(),
     timing: {
       dataFetchMs: dataFetchTime,
@@ -244,6 +241,46 @@ IMPORTANT RULES:
       totalMs: Date.now() - t0,
     },
   }
+}
+
+// ── Robust JSON extraction from LLM output ───────────────────────
+function extractJson(text) {
+  if (!text) return null
+  let t = String(text).trim()
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  try { return JSON.parse(t) } catch { /* fall through */ }
+  const m = t.match(/\{[\s\S]*\}/)
+  if (m) {
+    try { return JSON.parse(m[0]) } catch { /* fall through */ }
+    // Last resort: drop a trailing comma that breaks JSON.parse
+    try { return JSON.parse(m[0].replace(/,\s*([}\]])/g, '$1')) } catch { /* fall through */ }
+  }
+  return null
+}
+
+function firstNum(...cands) {
+  for (const c of cands) {
+    if (c !== undefined && c !== null && c !== '' && Number.isFinite(Number(c))) return Number(c)
+  }
+  return undefined
+}
+
+function firstArr(...cands) {
+  for (const c of cands) {
+    if (Array.isArray(c) && c.length) return c
+  }
+  return []
+}
+
+function clampScore(n) {
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 50
+}
+
+function pickPillar(nested, flatScore, flatReason, fallbackReason) {
+  const src = nested && typeof nested === 'object' ? nested : {}
+  const score = firstNum(flatScore, src.score)
+  const reasoning = flatReason || src.reasoning || src.text || fallbackReason
+  return { score: clampScore(score), reasoning: String(reasoning) }
 }
 
 // ── Generate detailed script from deep research ──────────────────
