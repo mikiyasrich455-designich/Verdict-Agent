@@ -1,17 +1,28 @@
-import 'dotenv/config' // MUST be first: loads .env before route modules read process.env
 import express from 'express'
 import cors from 'cors'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
 import ryoRoutes from './routes/ryo.js'
 import aceRoutes from './routes/acedata.js'
 import synthesisRoutes from './routes/synthesis.js'
 import { log } from './lib/logger.js'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const DIST = path.join(__dirname, '..', 'dist')
+
+// Load server/.env explicitly (works regardless of cwd; real env vars on Render take priority)
+dotenv.config({ path: path.join(__dirname, '.env') })
+
 const app = express()
 const PORT = process.env.PORT || 4000
 
 // Middleware
-app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'] }))
+app.use(cors({ origin: true }))
 app.use(express.json({ limit: '10mb' }))
+
+// Serve the built frontend (production: Render/hosting serves dist + API from one origin)
+app.use(express.static(DIST))
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -41,6 +52,14 @@ app.post('/test-post', (req, res) => {
 app.use('/api/proxy/ryo', ryoRoutes)
 app.use('/api/proxy/acedata', aceRoutes)
 app.use('/api/proxy/synthesis', synthesisRoutes)
+
+// SPA fallback: any non-API GET serves the React app
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/health')) {
+    return res.sendFile(path.join(DIST, 'index.html'))
+  }
+  next()
+})
 
 // Error handler
 app.use((err, req, res, next) => {
