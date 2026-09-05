@@ -9,7 +9,14 @@
 // Every call is fail-soft: a 404 / 429 / timeout on one source can never break a profile.
 import fetch from 'node-fetch'
 
-const JSON_HEADERS = { Accept: 'application/json', 'User-Agent': 'verdict-agent/1.0' }
+// Cloud hosts get share-ratelimited and sometimes IP-blocked by public data
+// APIs. A real browser UA plus a short backoff retry keeps enrichment alive.
+const JSON_HEADERS = {
+  Accept: 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+}
 
 const GT_BASE = 'https://api.geckoterminal.com/api/v2'
 const CG_BASE = 'https://api.coingecko.com/api/v3'
@@ -116,7 +123,12 @@ async function httpJsonOnce(url, timeoutMs) {
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(url, { signal: ctrl.signal, headers: JSON_HEADERS })
-    if (!res.ok) throw new Error(`${hostOf(url)} HTTP ${res.status}`)
+    if (!res.ok) {
+      const err = new Error(`${hostOf(url)} HTTP ${res.status}`)
+      err.status = res.status
+      err.retryAfter = Number(res.headers.get('retry-after')) || 0
+      throw err
+    }
     return await res.json()
   } finally {
     clearTimeout(timer)
@@ -128,14 +140,24 @@ function hostOf(url) {
   return m ? m[1].split('.')[0] : 'upstream'
 }
 
-// Public data APIs hiccup — one quick retry keeps the UX clean.
+// Public data APIs hiccup — and on shared cloud IPs they rate-limit. Retry with
+// a backoff (honouring Retry-After) before giving up on the enrichment.
 async function httpJson(url, timeoutMs = 9000) {
-  try {
-    return await httpJsonOnce(url, timeoutMs)
-  } catch (err) {
-    await new Promise((r) => setTimeout(r, 450))
-    return httpJsonOnce(url, timeoutMs)
+  let lastErr
+  for (let attemptNo = 0; attemptNo < 3; attemptNo += 1) {
+    try {
+      return await httpJsonOnce(url, timeoutMs)
+    } catch (err) {
+      lastErr = err
+      const status = err.status
+      // 4xx other than 408/429 is a real "not there" — no point hammering it.
+      if (status && status < 500 && status !== 408 && status !== 429) break
+      if (attemptNo === 2) break
+      const backoff = err.retryAfter ? Math.min(4000, err.retryAfter * 1000) : 400 * (attemptNo + 1) ** 2
+      await new Promise((r) => setTimeout(r, backoff))
+    }
   }
+  throw lastErr
 }
 
 // Fail-soft wrapper: enrichment is a bonus, never a blocker.
@@ -239,4 +261,11 @@ export function cgSearch(query) {
     () => httpJson(`${CG_BASE}/search?query=${encodeURIComponent(q)}`).then((d) => d?.coins || []),
     `coingecko search ${q}`
   )
+}
+
+// CoinGecko's search indexes contract addresses, so a CA can find its own coin
+// page even when GeckoTerminal has no coingecko_coin_id link for it.
+export function cgSearchByCa(ca) {
+  if (!ca) return Promise.resolve([])
+  return cgSearch(ca)
 }

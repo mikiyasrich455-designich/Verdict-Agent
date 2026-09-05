@@ -16,6 +16,7 @@ import {
   gtSearchPools,
   gtOhlcv,
   cgCoin,
+  cgSearchByCa,
 } from './marketData.js'
 
 const EVM_CA_RE = /^0x[a-fA-F0-9]{40}$/
@@ -165,21 +166,22 @@ function ageInDays(fromMs) {
 async function applyGeckoTerminal(profile) {
   const detail = await gtTokenDetail(profile.chain, profile.ca)
   const attrs = detail?.data?.attributes
-  if (!attrs) return profile
 
-  profile.logo = profile.logo || attrs.image_url || null
-  profile.banner = profile.banner || attrs.banner_image_url || null
-  profile.decimals = Number.isFinite(Number(attrs.decimals)) ? Number(attrs.decimals) : profile.decimals
-  profile.totalSupply = num(attrs.normalized_total_supply) || profile.totalSupply
-  profile.gtMarketCap = num(attrs.market_cap_usd) || null
-  profile.fdv = num(attrs.fdv_usd) || profile.fdv
-  profile.tokenVolume24h = num(attrs.volume_usd?.h24) || profile.volume24h
-  profile.totalReserveUsd = num(attrs.total_reserve_in_usd) || null
-  profile.cgCoinId = attrs.coingecko_coin_id || null
-  if (num(attrs.price_usd)) profile.priceUsd = num(attrs.price_usd)
+  if (attrs) {
+    profile.logo = profile.logo || attrs.image_url || null
+    profile.banner = profile.banner || attrs.banner_image_url || null
+    profile.decimals = Number.isFinite(Number(attrs.decimals)) ? Number(attrs.decimals) : profile.decimals
+    profile.totalSupply = num(attrs.normalized_total_supply) || profile.totalSupply
+    profile.gtMarketCap = num(attrs.market_cap_usd) || null
+    profile.fdv = num(attrs.fdv_usd) || profile.fdv
+    profile.tokenVolume24h = num(attrs.volume_usd?.h24) || profile.volume24h
+    profile.totalReserveUsd = num(attrs.total_reserve_in_usd) || null
+    profile.cgCoinId = attrs.coingecko_coin_id || null
+    if (num(attrs.price_usd)) profile.priceUsd = num(attrs.price_usd)
+  }
 
   // Deepest GeckoTerminal pool wins the exchange label and the candle feed.
-  const pools = (Array.isArray(detail.included) ? detail.included : []).filter((i) => i?.type === 'pool')
+  const pools = (Array.isArray(detail?.included) ? detail.included : []).filter((i) => i?.type === 'pool')
   let bestPool = null
   let bestReserve = -1
   for (const pool of pools) {
@@ -284,8 +286,20 @@ async function geckoFallback(ca) {
 
 // ── CoinGecko: the "info thing" — what the project actually is ───────────────
 async function applyCoinGecko(profile) {
-  if (!profile.cgCoinId) return profile
-  const coin = await cgCoin(profile.cgCoinId)
+  let coinId = profile.cgCoinId
+  // GeckoTerminal has no CoinGecko link (or its detail call was rate-limited):
+  // CoinGecko indexes contract addresses in search, so ask it directly.
+  if (!coinId && profile.ca) {
+    const hits = await cgSearchByCa(profile.ca)
+    const wanted = String(profile.ca).toLowerCase()
+    const hit = (hits || []).find((c) =>
+      Object.values(c.platforms || {}).some((a) => String(a).toLowerCase() === wanted)
+    )
+    coinId = hit?.id || null
+    if (coinId) profile.cgCoinId = coinId
+  }
+  if (!coinId) return profile
+  const coin = await cgCoin(coinId)
   if (!coin) return profile
 
   // Trust but verify: CoinGecko links can be stale. If the listed coin publishes
