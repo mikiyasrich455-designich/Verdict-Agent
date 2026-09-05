@@ -159,14 +159,61 @@ function PriceChart({ history, change }) {
   )
 }
 
+// The route a lookup took stays internal — the UI says what was matched, not who
+// answered it.
+const MATCH_LABEL = {
+  contract: 'contract address',
+  contract_dexscreener: 'contract address',
+  contract_geckoterminal: 'contract address',
+  ticker: 'ticker symbol',
+  ticker_unverified: 'ticker symbol · unverified',
+  name: 'token name',
+  search: 'live search',
+}
+const matchLabel = (m) => MATCH_LABEL[m] || (m ? 'live market data' : '—')
+const LAYER_LABEL = { RYO: 'AI reasoning', 'Live market structure': 'Live market data' }
+const layerLabel = (v) => (v ? LAYER_LABEL[v] || 'live market data' : '—')
+
 function Loading() {
+  const steps = ['Reading the contract', 'Matching the network', 'Pulling price, cap & volume', 'Collecting logo, links & description']
   return (
-    <div className="glass-panel flex flex-col items-center py-14 px-6">
-      <div className="inline-flex items-center gap-3 text-snow">
-        <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-        <span className="font-mono text-sm">resolving token from live markets…</span>
+    <div className="space-y-4">
+      <div className="glass-panel relative overflow-hidden">
+        <div className="p-5 md:p-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.06] animate-pulse flex-shrink-0" />
+            <div className="flex-1 space-y-2.5 max-w-sm">
+              <div className="h-5 w-40 rounded-md bg-white/[0.07] animate-pulse" />
+              <div className="h-3 w-56 rounded-md bg-white/[0.05] animate-pulse" />
+            </div>
+            <div className="ml-auto text-right">
+              <div className="h-3 w-14 rounded-md bg-white/[0.05] animate-pulse ml-auto" />
+              <div className="h-7 w-24 rounded-md bg-white/[0.07] animate-pulse mt-2" />
+            </div>
+          </div>
+        </div>
       </div>
-      <p className="mt-3 text-faint text-xs font-mono">DEXSCREENER · GECKOTERMINAL · COINGECKO — EVERY CHAIN</p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="glass-panel !p-4">
+            <div className="h-2.5 w-16 rounded bg-white/[0.05] animate-pulse" />
+            <div className="h-6 w-20 rounded bg-white/[0.07] animate-pulse mt-2.5" />
+          </div>
+        ))}
+      </div>
+
+      <div className="glass-panel flex flex-col items-center py-9 px-6">
+        <div className="inline-flex items-center gap-3 text-snow">
+          <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <span className="font-mono text-sm">resolving token from live markets…</span>
+        </div>
+        <div className="mt-4 grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-center">
+          {steps.map((s) => (
+            <p key={s} className="text-[11.5px] font-mono text-faint">{s}…</p>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -276,7 +323,7 @@ export default function TokenAnalysis() {
                     <span className="text-[11px] font-mono text-faint">{p.decimals} decimals</span>
                   )}
                   {p.matchType && (
-                    <span className="text-[11px] font-mono text-faint">matched by {p.matchType}</span>
+                    <span className="text-[11px] font-mono text-faint">matched by {matchLabel(p.matchType)}</span>
                   )}
                 </div>
                 {p.description && (
@@ -303,7 +350,7 @@ export default function TokenAnalysis() {
             <LinkChip href={p.whitepaper} icon={FileText}>Whitepaper</LinkChip>
             <LinkChip href={p.dexUrl} icon={Layers}>{p.exchange || 'DEX'} pool</LinkChip>
             <LinkChip href={p.explorer} icon={Search}>Explorer</LinkChip>
-            <LinkChip href={p.cgUrl} icon={ExternalLink}>CoinGecko</LinkChip>
+            <LinkChip href={p.cgUrl} icon={ExternalLink}>Listing</LinkChip>
             {(p.categories || []).slice(0, 4).map((c) => (
               <span key={c} className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border border-line text-faint">
                 {c}
@@ -360,7 +407,7 @@ export default function TokenAnalysis() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <Panel
-            title={`Price Action · ${(p.priceHistory || []).length} hourly candles`}
+            title={`Price Action · ${(p.priceHistory || []).length} live points`}
             icon={Activity}
             delay={0.16}
             actions={
@@ -386,7 +433,7 @@ export default function TokenAnalysis() {
                 ['Circulating', p.circulatingSupply ? `${fmtNum(p.circulatingSupply)} ${p.symbol}` : '—'],
                 ['Total Supply', p.totalSupply ? `${fmtNum(p.totalSupply)} ${p.symbol}` : '—'],
                 ['MC / FDV', p.marketCapFdvRatio ? p.marketCapFdvRatio.toFixed(2) : '—'],
-                ['CoinGecko Rank', p.cgRank ? `#${fmtNum(p.cgRank)}` : 'not listed'],
+                ['Global Rank', p.cgRank ? `#${fmtNum(p.cgRank)}` : 'not ranked'],
                 ['Watchlists', p.watchers ? fmtNum(p.watchers) : '—'],
                 ['Pool Reserve', fmtUsd(p.totalReserveUsd)],
                 ['All-Time High', p.ath ? fmtPrice(p.ath) : '—'],
@@ -440,19 +487,26 @@ export default function TokenAnalysis() {
 
           <Panel title="Identity & Sources" icon={ShieldAlert} delay={0.26}>
             <div className="space-y-2">
-              <KV k="Matched by" v={p.matchType === 'contract' ? 'contract address' : (p.matchType || '—')} />
+              <KV k="Matched by" v={matchLabel(p.matchType)} />
               <KV k="Chain" v={p.chainLabel || p.chain || 'unknown'} />
               <KV k="Contract" v={p.ca || 'not published'} />
               <KV k="Pool / pair" v={p.pairAddress || p.poolAddress || '—'} />
               <KV k="Venue" v={p.exchange || '—'} />
-              <KV k="Analysis layer" v={p.aiLayer || '—'} tone={p.aiLayer === 'RYO' ? 'text-success' : 'text-warning'} />
+              <KV k="Analysis layer" v={layerLabel(p.aiLayer)} tone={p.aiLayer === 'RYO' ? 'text-warning' : 'text-success'} />
             </div>
             <div className="flex flex-wrap gap-1.5 mt-4">
-              {['DexScreener', 'GeckoTerminal', 'CoinGecko'].map((s) => (
-                <span key={s} className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border border-line text-faint">
-                  {s}
-                </span>
-              ))}
+              {[
+                p.ca ? 'contract verified' : null,
+                p.priceHistory?.length ? 'price history live' : null,
+                p.description ? 'project info live' : null,
+                p.logo ? 'artwork live' : null,
+              ]
+                .filter(Boolean)
+                .map((s) => (
+                  <span key={s} className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border border-line text-faint">
+                    {s}
+                  </span>
+                ))}
             </div>
           </Panel>
 

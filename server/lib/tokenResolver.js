@@ -17,7 +17,8 @@ import {
   gtPool,
   gtOhlcv,
   cgCoin,
-  cgSearchByCa,
+  cgCoinByCa,
+  cgMarketChart,
 } from './marketData.js'
 
 const EVM_CA_RE = /^0x[a-fA-F0-9]{40}$/
@@ -237,7 +238,7 @@ async function applyGeckoTerminal(profile) {
       price: num(c[4]),
       volume: num(c[5]),
     }))
-    profile.chartSource = 'GeckoTerminal OHLCV'
+    profile.chartSource = 'live candles · hourly'
     const first = profile.priceHistory[0].price
     const last = profile.priceHistory[profile.priceHistory.length - 1].price
     if (first > 0) profile.change32h = Math.round(((last - first) / first) * 10000) / 100
@@ -290,8 +291,10 @@ async function geckoFallback(ca) {
     buys24h: num(a.transactions?.h24?.buys),
     sells24h: num(a.transactions?.h24?.sells),
     logo: bt.image_url || null,
-    banner: bt.banner_url || null,
-    socials: Array.isArray(bt.socials) ? bt.socials : [],
+    banner: bt.banner_image_url || null,
+    cgCoinId: bt.coingecko_coin_id || null,
+    totalSupply: num(bt.total_supply),
+    socials: [],
     websites: [],
     description: null,
     categories: [],
@@ -302,21 +305,14 @@ async function geckoFallback(ca) {
 
 // ── CoinGecko: the "info thing" — what the project actually is ───────────────
 async function applyCoinGecko(profile) {
-  let coinId = profile.cgCoinId
-  // GeckoTerminal has no CoinGecko link (or its detail call was rate-limited):
-  // CoinGecko indexes contract addresses in search, so ask it directly.
-  if (!coinId && profile.ca) {
-    const hits = await cgSearchByCa(profile.ca)
-    const wanted = String(profile.ca).toLowerCase()
-    const hit = (hits || []).find((c) =>
-      Object.values(c.platforms || {}).some((a) => String(a).toLowerCase() === wanted)
-    )
-    coinId = hit?.id || null
-    if (coinId) profile.cgCoinId = coinId
+  let coin = profile.cgCoinId ? await cgCoin(profile.cgCoinId) : null
+  if (!coin?.id && profile.ca) {
+    // GeckoTerminal published no CoinGecko link (or its detail call was
+    // rate-limited): the contract endpoint is the only exact address→coin map.
+    coin = await cgCoinByCa(profile.chain, profile.ca)
   }
-  if (!coinId) return profile
-  const coin = await cgCoin(coinId)
-  if (!coin) return profile
+  if (!coin?.id) return profile
+  profile.cgCoinId = coin.id
 
   // Trust but verify: CoinGecko links can be stale. If the listed coin publishes
   // contract addresses, ours must be one of them — otherwise skip it entirely
@@ -366,6 +362,28 @@ async function applyCoinGecko(profile) {
   return profile
 }
 
+// A price tape from CoinGecko when GeckoTerminal's candle feed is unavailable.
+// Thin listings return an empty 1-day series, so the window widens until points exist.
+async function applyCoinGeckoTape(profile) {
+  if ((profile.priceHistory || []).length || !profile.cgCoinId) return
+  for (const days of [1, 7, 30]) {
+    const chart = await cgMarketChart(profile.cgCoinId, days)
+    const prices = chart?.prices || []
+    if (prices.length < 4) continue
+    const volumes = chart.total_volumes || []
+    const slice = prices.slice(-32)
+    const offset = prices.length - slice.length
+    profile.priceHistory = slice.map(([t, price], i) => ({
+      i,
+      t: Number(t) || 0,
+      price: Number(price) || 0,
+      volume: Number(volumes[offset + i]?.[1]) || 0,
+    }))
+    profile.chartSource = `live history · last ${days === 1 ? '24 hours' : `${days} days`}`
+    return
+  }
+}
+
 // ── Stale-while-error ────────────────────────────────────────────────────────
 // Public data APIs rate-limit shared cloud IPs hard. Anything we have once
 // confirmed about a contract's identity, artwork or copy is kept for hours, so a
@@ -392,6 +410,11 @@ function rememberSticky(profile) {
   for (const f of STICKY_FIELDS) if (!isBlank(profile[f])) bag.fields[f] = profile[f]
   if (profile.name && !PAIR_LIKE_NAME.test(profile.name)) bag.fields.name = profile.name
   if (profile.symbol && profile.symbol !== 'UNKNOWN') bag.fields.symbol = profile.symbol
+  // A candle history is time-stamped, so an older one still tells the truth.
+  if ((profile.priceHistory || []).length > 3) {
+    bag.fields.priceHistory = profile.priceHistory.slice(-32)
+    bag.fields.chartSource = profile.chartSource || 'candle feed'
+  }
   stickyByCa.set(stickyKey(profile), bag)
   if (stickyByCa.size > 400) {
     for (const [k, v] of stickyByCa) {
@@ -416,6 +439,12 @@ function restoreSticky(profile) {
     restored = true
   }
   if (!profile.symbol || profile.symbol === 'UNKNOWN') profile.symbol = bag.fields.symbol || profile.symbol
+  const cached = bag.fields.priceHistory
+  if (!(profile.priceHistory || []).length && Array.isArray(cached) && cached.length > 3) {
+    profile.priceHistory = cached
+    profile.chartSource = `${bag.fields.chartSource || 'candle feed'} · cached`
+    restored = true
+  }
   if (restored) profile.stickyEnrichment = true
 }
 
@@ -431,6 +460,11 @@ async function hydrate(profile, candidates) {
       await applyCoinGecko(profile)
     } catch (err) {
       console.warn('[tokenResolver] coingecko enrichment skipped:', err.message)
+    }
+    try {
+      await applyCoinGeckoTape(profile)
+    } catch (err) {
+      console.warn('[tokenResolver] coingecko chart skipped:', err.message)
     }
     restoreSticky(profile)
     rememberSticky(profile)

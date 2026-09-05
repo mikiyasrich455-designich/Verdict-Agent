@@ -12,7 +12,14 @@
 
 const DEX = 'https://api.dexscreener.com/latest/dex'
 const CG = 'https://api.coingecko.com/api/v3'
-const TIMEOUT = 8000
+// Two ceilings, because this runs before the profile is painted: one request may
+// stall for TIMEOUT, and the whole enrichment gets BUDGET before the page renders
+// whatever has been filled so far. Without the budget a slow network leaves the
+// console sitting on an empty dark screen for half a minute.
+const TIMEOUT = 4500
+const BUDGET = 9000
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const blank = (v) =>
   v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)
@@ -69,21 +76,61 @@ async function fromDexScreener(p) {
 }
 
 // ── CoinGecko: the "info thing" — what the project is, plus a real price tape ─
-async function fromCoinGecko(p) {
-  const hits = await getJson(`${CG}/search?query=${encodeURIComponent(p.ca)}`)
-  const wanted = String(p.ca).toLowerCase()
-  const coinId = (hits?.coins || [])
-    .filter((c) => Object.values(c.platforms || {}).some((a) => String(a).toLowerCase() === wanted))
-    .map((c) => c.id)[0]
-  if (!coinId) return false
+// CoinGecko's own platform slugs for the chains people actually paste addresses from.
+const CG_PLATFORM = {
+  ethereum: 'ethereum',
+  eth: 'ethereum',
+  bsc: 'binance-smart-chain',
+  polygon: 'polygon-pos',
+  avalanche: 'avalanche',
+  fantom: 'fantom',
+  solana: 'solana',
+  arbitrum: 'arbitrum-one',
+  optimism: 'optimistic-ethereum',
+  base: 'base',
+  sui: 'sui',
+  aptos: 'aptos',
+  tron: 'tron',
+  ton: 'the-open-network',
+  gnosis: 'xdai',
+  xdai: 'xdai',
+}
 
+const SLIM =
+  '?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false'
+
+async function resolveCoinId(p) {
+  if (p.cgCoinId) return p.cgCoinId
+  const wanted = String(p.ca).toLowerCase()
+  const platform = CG_PLATFORM[String(p.chain || '').toLowerCase()]
+  if (!platform) return null
+  // /search?query=<address> never matches, so the contract endpoint is the only
+  // exact address→coin mapping available.
+  const hit = await getJson(`${CG}/coins/${platform}/contract/${encodeURIComponent(p.ca)}`)
+  const listed = Object.values(hit?.platforms || {}).map((a) => String(a).toLowerCase())
+  if (!hit?.id || (listed.length && !listed.includes(wanted))) return null
+  return hit.id
+}
+
+// Thin listings come back with an empty 1-day series, so widen the window until
+// there is something real to plot.
+async function chartFor(coinId) {
+  for (const days of [1, 7, 30]) {
+    const chart = await getJson(`${CG}/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`)
+    if ((chart?.prices || []).length > 3) return { chart, days }
+  }
+  return null
+}
+
+async function fromCoinGecko(p) {
+  const wanted = String(p.ca).toLowerCase()
+  const coinId = await resolveCoinId(p)
+  if (!coinId) return false
+  p.cgCoinId = coinId
   const wantsChart = !(p.priceHistory || []).length
-  const [coin, chart] = await Promise.all([
-    getJson(
-      `${CG}/coins/${encodeURIComponent(coinId)}` +
-        '?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false'
-    ),
-    wantsChart ? getJson(`${CG}/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=1`) : null,
+  const [coin, tape] = await Promise.all([
+    getJson(`${CG}/coins/${encodeURIComponent(coinId)}${SLIM}`),
+    wantsChart ? chartFor(coinId) : null,
   ])
 
   let filled = false
@@ -122,17 +169,18 @@ async function fromCoinGecko(p) {
     }
   }
 
-  const prices = chart?.prices || []
+  const prices = tape?.chart?.prices || []
   if (prices.length > 3) {
-    const volumes = chart.total_volumes || []
+    const volumes = tape.chart.total_volumes || []
     const slice = prices.slice(-32)
+    const offset = prices.length - slice.length
     p.priceHistory = slice.map(([t, price], i) => ({
       i,
       t,
       price: Number(price) || 0,
-      volume: Number(volumes[volumes.length - slice.length + i]?.[1]) || 0,
+      volume: Number(volumes[offset + i]?.[1]) || 0,
     }))
-    p.chartSource = 'CoinGecko market chart'
+    p.chartSource = `live history · last ${tape.days === 1 ? '24 hours' : `${tape.days} days`}`
     return true
   }
   return filled
@@ -156,7 +204,13 @@ export async function enrichProfile(profile) {
   const jobs = []
   if (needsBranding) jobs.push(fromDexScreener(p).catch(() => false))
   if (needsInfo) jobs.push(fromCoinGecko(p).catch(() => false))
-  const done = await Promise.all(jobs)
-  if (done.some(Boolean)) p.browserEnriched = true
-  return p
+
+  // Enrichment is decoration, never a gate: whoever wins the race, the caller gets
+  // a detached snapshot so nothing can mutate a profile React has already rendered.
+  const work = Promise.all(jobs).then((done) => {
+    if (done.some(Boolean)) p.browserEnriched = true
+    return p
+  })
+  const raced = await Promise.race([work, wait(BUDGET).then(() => null)])
+  return { ...(raced || p) }
 }

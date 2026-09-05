@@ -133,7 +133,7 @@ export default function MarketOverview() {
   if (status === 'error') {
     return (
       <>
-        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'RYO market_overview' }} />
+        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'live market data' }} />
         {token && <TokenFocusStrip token={token} focus={focus} />}
         <ErrorState error={data} onRetry={() => rerun()} />
       </>
@@ -143,7 +143,7 @@ export default function MarketOverview() {
   if (status !== 'ready' || !data) {
     return (
       <>
-        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'RYO market_overview' }} />
+        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'live market data' }} />
         {token && <TokenFocusStrip token={token} focus={focus} />}
         <PageSkeleton />
       </>
@@ -160,7 +160,7 @@ export default function MarketOverview() {
         icon={Globe}
         title="Market Overview"
         subtitle="Reading the regime so every other agent knows the weather."
-        source={{ mode: 'live', name: 'RYO market_overview' }}
+        source={{ mode: 'live', name: 'live market data' }}
       >
         <button onClick={rerun} className="glass-chip">
           <RefreshCw size={12} /> Refresh

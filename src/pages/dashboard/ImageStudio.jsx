@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import VerdictBadge, { verdictColor } from '../../components/VerdictBadge'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioImage } from '../../lib/api'
-import { PageHeader, Panel, EmptyState } from '../../components/DashUI'
+import { PageHeader, Panel, EmptyState, friendlyError } from '../../components/DashUI'
 import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
 
@@ -27,7 +27,7 @@ function ImageStudioInner({ token, pick }) {
   if (!token) {
     return (
       <>
-        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'Seedream image' }} />
+        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
         <EmptyState
           icon={ImageIcon}
           title="Set a token first"
@@ -41,7 +41,7 @@ function ImageStudioInner({ token, pick }) {
   if (status !== 'ready' || !script) {
     return (
       <>
-        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'Seedream image' }} />
+        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
         <PageSkeleton />
       </>
     )
@@ -72,7 +72,7 @@ function ImageStudioInner({ token, pick }) {
         icon={ImageIcon}
         title={`Studio · Image · ${script.symbol}`}
         subtitle="Turn a verdict into shareable card art."
-        source={{ mode: 'live', name: 'Seedream image' }}
+        source={{ mode: 'live', name: 'AI image' }}
       >
         <VerdictBadge verdict={script.verdict} size="sm" animate={false} />
       </PageHeader>
@@ -130,7 +130,7 @@ function ImageStudioInner({ token, pick }) {
               {error && (
                 <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
                   <div className="empty-icon mx-auto mb-4"><ImageIcon size={22} className="text-danger" /></div>
-                  <p className="text-[13px] text-danger mb-3">{error}</p>
+                  <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
                   <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
                 </motion.div>
               )}

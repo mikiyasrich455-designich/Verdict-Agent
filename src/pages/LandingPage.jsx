@@ -10,13 +10,13 @@ import DashboardMock from '../components/DashboardMock'
 import OpsDashboard from '../components/OpsDashboard'
 import Logo from '../components/Logo'
 
-const RYO_TOOLS = [
-  { icon: ScanSearch, label: 'scan_market' },
-  { icon: RadarIcon, label: 'analyze_token' },
-  { icon: Brain, label: 'deep_analysis' },
-  { icon: Gauge, label: 'market_overview' },
-  { icon: GitCompareArrows, label: 'compare_tokens' },
-  { icon: Newspaper, label: 'sentiment_shift' },
+const AGENT_SKILLS = [
+  { icon: ScanSearch, label: 'market scan' },
+  { icon: RadarIcon, label: 'token analysis' },
+  { icon: Brain, label: 'deep analysis' },
+  { icon: Gauge, label: 'market regime' },
+  { icon: GitCompareArrows, label: 'side-by-side' },
+  { icon: Newspaper, label: 'sentiment drift' },
 ]
 
 const NOISE = ['FOMO', 'Hype', 'Rumors', 'Copium', 'Cope', 'ExitScam', 'NGMI']
@@ -26,7 +26,7 @@ const STEPS = [
   {
     n: '01',
     title: 'Market Scanned',
-    text: 'The scanner sweeps the RYO market snapshot and ranks candidates by momentum, breadth and regime.',
+    text: 'The scanner sweeps the live market snapshot and ranks candidates by momentum, breadth and regime.',
   },
   {
     n: '03',
@@ -240,7 +240,7 @@ function RegistryDiagram() {
               <span className="font-mono text-[10px] text-success">Connected</span>
             </div>
             <div className="mt-2 rounded-xl border border-line overflow-hidden">
-              {RYO_TOOLS.slice(0, 4).map(({ icon: Icon, label }, i) => (
+              {AGENT_SKILLS.slice(0, 4).map(({ icon: Icon, label }, i) => (
                 <div key={label} className={`flex items-center gap-3 px-4 py-3 bg-white/[0.02] ${i ? 'border-t border-line' : ''}`}>
                   <Icon size={14} className="text-accent flex-shrink-0" />
                   <div>
@@ -357,7 +357,7 @@ export default function LandingPage() {
       {/* ── TOOL MARQUEE ── */}
       <section className="py-14 border-y border-line bg-white/[0.015] overflow-hidden">
         <div className="ticker-track">
-          {[...RYO_TOOLS, ...RYO_TOOLS, ...RYO_TOOLS].map(({ icon: Icon, label }, i) => (
+          {[...AGENT_SKILLS, ...AGENT_SKILLS, ...AGENT_SKILLS].map(({ icon: Icon, label }, i) => (
             <div key={i} className="flex items-center gap-2.5 mx-4 px-5 py-3 rounded-lg border border-line bg-white/[0.04] backdrop-blur-md">
               <Icon size={16} className="text-accent" />
               <span className="text-sm font-mono text-snow whitespace-nowrap">{label}</span>

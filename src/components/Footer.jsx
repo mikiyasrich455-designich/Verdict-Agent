@@ -13,9 +13,9 @@ const columns = [
   {
     title: 'Research Layer',
     items: [
-      { label: 'analyze_token', to: '/verdict' },
-      { label: 'deep_analysis', to: '/verdict' },
-      { label: 'scan_market', to: '/dashboard' },
+      { label: 'Token Analysis', to: '/verdict' },
+      { label: 'Deep Analysis', to: '/verdict' },
+      { label: 'Market Scan', to: '/dashboard' },
     ],
   },
   {
@@ -74,7 +74,7 @@ export default function Footer() {
 
           <div className="mt-12 pt-6 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-3">
             <span className="text-xs text-faint font-mono">
-              Built on the RYO research layer · RYO-CHAN Hackathon 2026
+              Built for the RYO-CHAN Hackathon 2026
             </span>
             <span className="text-xs text-faint">Not financial advice. © 2026 VERDICT</span>
           </div>

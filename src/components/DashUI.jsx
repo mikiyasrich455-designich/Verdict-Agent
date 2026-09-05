@@ -4,6 +4,11 @@ import { motion } from 'framer-motion'
 
 const POPULAR_TOKENS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'MATIC']
 
+// Which upstream services answered is an implementation detail — it never reaches
+// the user, not even inside an error message.
+const PROVIDER_WORDS =
+  /\b(ryo[\s_-]?(chan|mcp)?|coingecko|dexscreener|gecko\s?terminal|acedata|ace\s?data|groq|qwen|grok|seedream|seedance|flux|serp|serpapi|moonshot|kimi|deepseek|openai|chatgpt|gemini|anthropic|claude|mistral|llama|ark|tts)\b/gi
+
 export const fmtUsd = (v) => {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return '—'
   const n = Number(v)
@@ -191,8 +196,20 @@ export function TokenQuickPick({ icon: Icon, title, hint, onPick }) {
 }
 
 // Error state — shows when an API call fails instead of looping on skeleton
+export function friendlyError(value) {
+  const raw = (typeof value === 'string' ? value : value?.message || '').trim()
+  if (!raw) return 'Something went wrong — try again.'
+  const cleaned = raw.replace(PROVIDER_WORDS, 'live feed').replace(/\s{2,}/g, ' ')
+  // Anything that still reads like an integration log (status codes, URLs, stack
+  // noise) is not worth showing verbatim.
+  if (/https?:\/\/|\b[45]\d\d\d?\b|\bError:|\bat\s+\S+:\d+/.test(cleaned)) {
+    return 'The live feed didn’t answer in time — try again in a moment.'
+  }
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}…` : cleaned
+}
+
 export function ErrorState({ error, onRetry, children }) {
-  const msg = error?.message || String(error) || 'Something went wrong'
+  const msg = friendlyError(error)
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}

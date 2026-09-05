@@ -225,7 +225,7 @@ function SideFooter() {
   return (
     <div className="px-4 py-3 border-t border-white/5">
       <p className="text-[10px] text-faint leading-relaxed">
-        Powered by RYO + AceData · Not financial advice.
+        Live market data · AI reasoning · Not financial advice.
       </p>
     </div>
   )

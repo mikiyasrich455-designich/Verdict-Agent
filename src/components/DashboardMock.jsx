@@ -38,7 +38,7 @@ export default function DashboardMock({ compact = false }) {
         </div>
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 text-[10px] font-mono text-success">
-            <span className="w-1.5 h-1.5 rounded-full bg-success" /> 6 RYO tools connected
+            <span className="w-1.5 h-1.5 rounded-full bg-success" /> 6 live data feeds connected
           </span>
         </div>
       </div>
@@ -100,9 +100,9 @@ export default function DashboardMock({ compact = false }) {
               <p className="text-[10px] text-faint font-mono uppercase tracking-wider mb-3">agent orchestration</p>
               <div className="flex items-center justify-between gap-1">
                 {[
-                  { label: 'scan_market', sub: 'candidates' },
-                  { label: 'analyze_token', sub: 'technicals' },
-                  { label: 'deep_analysis', sub: 'evidence' },
+                  { label: 'scan', sub: 'candidates' },
+                  { label: 'analyze', sub: 'technicals' },
+                  { label: 'deep dive', sub: 'evidence' },
                   { label: 'council', sub: 'bull vs bear' },
                   { label: 'verdict', sub: 'final call', final: true },
                 ].map((node, i, arr) => (

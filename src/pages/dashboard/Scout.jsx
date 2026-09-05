@@ -142,7 +142,7 @@ export default function Scout() {
   if (status === 'error') {
     return (
       <>
-        <PageHeader icon={Radar} title="Scout" subtitle="The token hunter — scans the tape and keeps only what survives the filter." source={{ mode: 'live', name: 'RYO scan_market' }} />
+        <PageHeader icon={Radar} title="Scout" subtitle="The token hunter — scans the tape and keeps only what survives the filter." source={{ mode: 'live', name: 'live market scan' }} />
         <ErrorState error={data} onRetry={() => rerun()} />
       </>
     )
@@ -151,7 +151,7 @@ export default function Scout() {
   if (status !== 'ready' || !data) {
     return (
       <>
-        <PageHeader icon={Radar} title="Scout" subtitle="The token hunter — scans the tape and keeps only what survives the filter." source={{ mode: 'live', name: 'RYO scan_market' }} />
+        <PageHeader icon={Radar} title="Scout" subtitle="The token hunter — scans the tape and keeps only what survives the filter." source={{ mode: 'live', name: 'live market scan' }} />
         {token && <PinnedTokenCard token={token} focus={focus} />}
         <PageSkeleton />
       </>
@@ -168,7 +168,7 @@ export default function Scout() {
         icon={Radar}
         title="Scout"
         subtitle="The token hunter — scans the tape and keeps only what survives the filter."
-        source={{ mode: 'live', name: 'RYO scan_market' }}
+        source={{ mode: 'live', name: 'live market scan' }}
       >
         <button onClick={rerun} className="glass-chip">
           <RefreshCw size={12} /> Re-scan

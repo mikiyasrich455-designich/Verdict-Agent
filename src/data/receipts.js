@@ -12,7 +12,7 @@ export function buildReceipt(verdictData, meta = {}) {
     confidence: verdictData.confidence,
     priceUsd: verdictData.priceUsd,
     asOf: verdictData.asOf,
-    sources: meta.sources || ['RYO analyze_token', 'Qwen verdict engine'],
+    sources: meta.sources || ['live market data', 'AI reasoning'],
     media: { image: !!meta.image, video: !!meta.video, voice: !!meta.voice },
   }
 }

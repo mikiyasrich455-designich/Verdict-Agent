@@ -19,7 +19,7 @@ export default function SentimentShift() {
   if (status === 'error') {
     return (
       <>
-        <PageHeader icon={Gauge} title="Sentiment Shift" subtitle="Seven-day mood drift — where the crowd is heading, not where it stood." source={{ mode: 'live', name: 'RYO sentiment_shift' }} />
+        <PageHeader icon={Gauge} title="Sentiment Shift" subtitle="Seven-day mood drift — where the crowd is heading, not where it stood." source={{ mode: 'live', name: 'live sentiment' }} />
         <ErrorState error={data} onRetry={() => rerun()} />
       </>
     )
@@ -28,7 +28,7 @@ export default function SentimentShift() {
   if (status !== 'ready' || !data) {
     return (
       <>
-        <PageHeader icon={Gauge} title="Sentiment Shift" subtitle="Seven-day mood drift — where the crowd is heading, not where it stood." source={{ mode: 'live', name: 'RYO sentiment_shift' }} />
+        <PageHeader icon={Gauge} title="Sentiment Shift" subtitle="Seven-day mood drift — where the crowd is heading, not where it stood." source={{ mode: 'live', name: 'live sentiment' }} />
         <PageSkeleton />
       </>
     )
@@ -44,7 +44,7 @@ export default function SentimentShift() {
         icon={Gauge}
         title="Sentiment Shift"
         subtitle="Seven-day mood drift — where the crowd is heading, not where it stood."
-        source={{ mode: 'live', name: 'RYO sentiment_shift' }}
+        source={{ mode: 'live', name: 'live sentiment' }}
       >
         <button onClick={rerun} className="glass-chip"><RefreshCw size={12} /> Refresh</button>
       </PageHeader>

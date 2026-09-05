@@ -195,7 +195,7 @@ IMPORTANT RULES:
 - Each pillar object MUST have both "score" (number) and "reasoning" (non-empty string).
 - Be specific. Use actual numbers, dates, events from the data. Don't hedge.
 - bullScore + bearScore ≈ 100 (±15). Verdict: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD.
-- Ground all reasoning in the provided RYO + SERP data.`
+- Ground all reasoning in the provided market data and web results. Never name the data providers, tools or models behind the inputs — write as an analyst, not an integration log.`
 
   // Call Grok for deep analysis
   console.log(`[DEEP] ${symbolUpper}: Calling Grok for analysis...`)

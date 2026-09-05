@@ -87,7 +87,7 @@ export default function Compare() {
         icon={Scale}
         title="Compare"
         subtitle="Put up to four tokens side by side — the council picks the strongest case."
-        source={{ mode: 'live', name: 'RYO compare_tokens' }}
+        source={{ mode: 'live', name: 'live comparison' }}
       >
         <button onClick={rerun} className="glass-chip"><RefreshCw size={12} /> Re-run</button>
       </PageHeader>

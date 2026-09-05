@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import VerdictBadge from '../../components/VerdictBadge'
 import { useAgentData } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioVideo } from '../../lib/api'
-import { PageHeader, Panel, EmptyState } from '../../components/DashUI'
+import { PageHeader, Panel, EmptyState, friendlyError } from '../../components/DashUI'
 import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
 
@@ -28,7 +28,7 @@ function VideoStudioInner({ token, pick }) {
   if (!token) {
     return (
       <>
-        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'Seedance video' }} />
+        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
         <EmptyState
           icon={Video}
           title="Set a token first"
@@ -42,7 +42,7 @@ function VideoStudioInner({ token, pick }) {
   if (status !== 'ready' || !script) {
     return (
       <>
-        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'Seedance video' }} />
+        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
         <PageSkeleton />
       </>
     )
@@ -83,7 +83,7 @@ function VideoStudioInner({ token, pick }) {
         icon={Video}
         title={`Studio · Video · ${script.symbol}`}
         subtitle="Turn a verdict into a short motion clip."
-        source={{ mode: 'live', name: 'Seedance video' }}
+        source={{ mode: 'live', name: 'AI video' }}
       >
         <VerdictBadge verdict={script.verdict} size="sm" animate={false} />
       </PageHeader>
@@ -143,7 +143,7 @@ function VideoStudioInner({ token, pick }) {
               {error && (
                 <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
                   <div className="empty-icon mx-auto mb-4"><Video size={22} className="text-danger" /></div>
-                  <p className="text-[13px] text-danger mb-3">{error}</p>
+                  <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
                   <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
                 </motion.div>
               )}

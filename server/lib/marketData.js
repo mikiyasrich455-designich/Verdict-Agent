@@ -245,16 +245,71 @@ export function gtOhlcv(chain, poolAddress, { timeframe = 'hour', aggregate = 1,
 }
 
 // ── CoinGecko ───────────────────────────────────────────────────
+// CoinGecko's own platform slugs (a third naming scheme). Only the chains we can
+// name are mapped; anything else simply misses the contract lookup and stays
+// un-enriched rather than guessing.
+const CG_PLATFORM = {
+  ethereum: 'ethereum',
+  eth: 'ethereum',
+  bsc: 'binance-smart-chain',
+  binance: 'binance-smart-chain',
+  polygon: 'polygon-pos',
+  avalanche: 'avalanche',
+  fantom: 'fantom',
+  solana: 'solana',
+  arbitrum: 'arbitrum-one',
+  optimism: 'optimistic-ethereum',
+  base: 'base',
+  sui: 'sui',
+  aptos: 'aptos',
+  tron: 'tron',
+  near: 'near',
+  cardano: 'cardano',
+  celo: 'celo',
+  gnosis: 'xdai',
+  xdai: 'xdai',
+  zksync: 'zksync',
+  linea: 'linea',
+  scroll: 'scroll',
+  mantle: 'mantle',
+  mode: 'mode',
+  blast: 'blast',
+  core: 'core',
+  pulsechain: 'pulsechain',
+  ton: 'the-open-network',
+  sei: 'sei-network',
+  hedera: 'hedera-hashgraph',
+  moonbeam: 'moonbeam',
+  cronos: 'crypto-com-chain',
+  monad: 'monad',
+  harmony: 'harmony-shard-2',
+  manta: 'manta-pacific',
+  zora: 'zora',
+  plume: 'plume',
+  thundercore: 'thundercore',
+  wanchain: 'wanchain',
+}
+
+export function cgPlatform(chain) {
+  return CG_PLATFORM[String(chain || '').toLowerCase()] || null
+}
+
+const CG_SLIM = '?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false'
+
 export function cgCoin(coinId) {
   if (!coinId) return Promise.resolve(null)
+  return attempt(() => httpJson(`${CG_BASE}/coins/${encodeURIComponent(coinId)}${CG_SLIM}`, 9000), `coingecko coin ${coinId}`)
+}
+
+// The only exact contract→coin mapping CoinGecko offers: search does NOT index
+// addresses (measured: /search?query=<ca> always returns zero coins), so this is
+// how a CA reaches its description, links, categories and history.
+export function cgCoinByCa(chain, ca) {
+  const platform = cgPlatform(chain)
+  if (!platform || !ca) return Promise.resolve(null)
   return attempt(
-    () =>
-      httpJson(
-        `${CG_BASE}/coins/${encodeURIComponent(coinId)}` +
-          '?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false',
-        9000
-      ),
-    `coingecko coin ${coinId}`
+    () => httpJson(`${CG_BASE}/coins/${platform}/contract/${encodeURIComponent(ca)}${CG_SLIM}`, 9000),
+    `coingecko contract ${platform}/${ca}`
   )
 }
 
@@ -266,9 +321,13 @@ export function cgSearch(query) {
   )
 }
 
-// CoinGecko's search indexes contract addresses, so a CA can find its own coin
-// page even when GeckoTerminal has no coingecko_coin_id link for it.
-export function cgSearchByCa(ca) {
-  if (!ca) return Promise.resolve([])
-  return cgSearch(ca)
+// Thin tokens come back with an empty 1-day series, so callers can widen the
+// window; the point list is returned as-is for the chart to trim.
+export function cgMarketChart(coinId, days = 1) {
+  if (!coinId) return Promise.resolve(null)
+  return attempt(
+    () =>
+      httpJson(`${CG_BASE}/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`, 9000),
+    `coingecko chart ${coinId}/${days}d`
+  )
 }

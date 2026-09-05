@@ -37,7 +37,7 @@ function RunningFlow({ symbol }) {
         <span className="font-mono text-muted text-sm">{elapsed}s</span>
       </div>
       <p className="mt-4 text-faint text-xs font-mono">
-        GATHERING DATA FROM RYO + LIVE SERP · AI REASONING
+        GATHERING LIVE MARKET DATA · AI REASONING
       </p>
     </div>
   )
@@ -96,7 +96,7 @@ export default function DeepAnalysis() {
   if (!token) {
     return (
       <>
-        <PageHeader icon={Microscope} title="Deep Analysis" subtitle="The forensic read — five pillars, full reasoning, no hand-waving." source={{ mode: 'ai', name: 'Qwen verdict engine' }} />
+        <PageHeader icon={Microscope} title="Deep Analysis" subtitle="The forensic read — five pillars, full reasoning, no hand-waving." source={{ mode: 'ai', name: 'AI reasoning' }} />
         <EmptyState
           icon={Microscope}
           title="Set a token first"
@@ -110,7 +110,7 @@ export default function DeepAnalysis() {
   if (phase === 'running') {
     return (
       <>
-        <PageHeader icon={Microscope} title={`Deep Analysis · ${token.toUpperCase()}`} subtitle="Running the five-pillar pipeline…" source={{ mode: 'ai', name: 'Qwen verdict engine' }} />
+        <PageHeader icon={Microscope} title={`Deep Analysis · ${token.toUpperCase()}`} subtitle="Running the five-pillar pipeline…" source={{ mode: 'ai', name: 'AI reasoning' }} />
         <RunningFlow symbol={token.toUpperCase()} />
       </>
     )
@@ -119,7 +119,7 @@ export default function DeepAnalysis() {
   if (phase === 'error') {
     return (
       <>
-        <PageHeader icon={Microscope} title={`Deep Analysis · ${token.toUpperCase()}`} subtitle="The verdict engine couldn't generate a read." source={{ mode: 'ai', name: 'Qwen verdict engine' }} />
+        <PageHeader icon={Microscope} title={`Deep Analysis · ${token.toUpperCase()}`} subtitle="The verdict engine couldn't generate a read." source={{ mode: 'ai', name: 'AI reasoning' }} />
         <ErrorState error={result?.error} onRetry={() => setRunKey((k) => k + 1)} />
       </>
     )
@@ -136,7 +136,7 @@ export default function DeepAnalysis() {
         icon={Microscope}
         title={`Deep Analysis · ${v.symbol}`}
         subtitle={`${v.name} · ${strong} of 5 pillars in the strong band`}
-        source={{ mode: 'ai', name: 'Qwen verdict engine' }}
+        source={{ mode: 'ai', name: 'AI reasoning' }}
       >
         <button onClick={() => setRunKey((k) => k + 1)} className="glass-chip">
           <RefreshCw size={12} /> Re-run

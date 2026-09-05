@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { Component, useState, useEffect } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import GlobalBackground from './components/GlobalBackground'
@@ -68,6 +68,60 @@ function CouncilRedirect() {
   return <Navigate to={{ pathname: '/dashboard/council', search: location.search }} replace />
 }
 
+// If any screen throws while rendering, React unmounts the whole tree and the user
+// is left staring at the dark body colour. This keeps the last good frame on screen
+// and shows a recoverable message instead of a black page.
+class CrashGuard extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { failed: false }
+    this.reset = this.reset.bind(this)
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error) {
+    console.error('[verdict] screen failed to render:', error)
+  }
+
+  reset() {
+    this.setState({ failed: false })
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="min-h-[70vh] flex items-center justify-center px-6">
+          <div className="max-w-md w-full rounded-2xl border border-line bg-panel/70 backdrop-blur p-6 text-center">
+            <p className="text-sm font-semibold text-snow">This screen hit a snag</p>
+            <p className="mt-2 text-xs text-faint leading-relaxed">
+              The data on this page could not be displayed. Nothing was lost — your
+              analysis is still running in the background.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <button
+                onClick={this.reset}
+                className="text-xs font-semibold px-4 py-2 rounded-lg bg-accent text-night hover:opacity-90"
+              >
+                Try again
+              </button>
+              <a
+                href="/dashboard"
+                className="text-xs font-semibold px-4 py-2 rounded-lg border border-line text-snow hover:bg-panel"
+              >
+                Back to console
+              </a>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function Shell() {
   return (
     <Routes>
@@ -102,11 +156,13 @@ function App() {
       <div className="min-h-screen bg-night text-snow font-sans">
         <GlobalBackground />
         <div className="relative z-10">
-          {!hasAcceptedDisclaimer ? (
-            <CautionPage onAccept={handleAcceptDisclaimer} />
-          ) : (
-            <Shell />
-          )}
+          <CrashGuard key={hasAcceptedDisclaimer ? 'console' : 'intro'}>
+            {!hasAcceptedDisclaimer ? (
+              <CautionPage onAccept={handleAcceptDisclaimer} />
+            ) : (
+              <Shell />
+            )}
+          </CrashGuard>
         </div>
       </div>
     </Router>

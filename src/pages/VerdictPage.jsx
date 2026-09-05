@@ -7,6 +7,7 @@ import TokenSearch from '../components/TokenSearch'
 import VerdictCard, { ShareCard, POINT_LABELS } from '../components/VerdictCard'
 import ReasoningPanel from '../components/ReasoningPanel'
 import { fetchVerdict } from '../lib/api'
+import { friendlyError } from '../components/DashUI'
 import { resolveTokenInput } from '../components/DashboardShell'
 import { setActiveToken, tokenQuery } from '../lib/activeToken'
 
@@ -51,7 +52,7 @@ export default function VerdictPage() {
         setVerdict(result)
         setState('done')
       } catch (err) {
-        setError(err.message || 'Analysis failed — try again')
+        setError(friendlyError(err) || 'Analysis failed — try again')
         setState('error')
       } finally {
         runningRef.current = false
@@ -142,7 +143,7 @@ export default function VerdictPage() {
                 </span>
               </div>
               <p className="mt-4 text-faint text-xs font-mono">
-                GATHERING DATA FROM RYO + LIVE SERP · AI REASONING
+                GATHERING LIVE MARKET DATA · AI REASONING
               </p>
             </motion.div>
           )}

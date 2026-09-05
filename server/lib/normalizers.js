@@ -280,7 +280,7 @@ export function normalizeProfile(ryoRaw, fallbackSymbol) {
 const LIVE_FIELDS = [
   'symbol', 'name', 'ca', 'chain', 'chainLabel', 'isCA', 'decimals',
   'logo', 'banner', 'description', 'categories', 'socials', 'websites',
-  'website', 'whitepaper', 'explorer', 'twitter', 'telegram', 'github', 'cgUrl',
+  'website', 'whitepaper', 'explorer', 'twitter', 'telegram', 'github', 'cgUrl', 'cgCoinId',
   'exchange', 'exchangeId', 'pairName', 'pairAddress', 'poolAddress', 'dexUrl', 'quoteSymbol',
   'priceUsd', 'change24h', 'change1h', 'change6h', 'change32h',
   'marketCap', 'fdv', 'volume24h', 'volume6h', 'tokenVolume24h', 'liquidityUsd', 'poolLiquidityUsd',
@@ -326,8 +326,8 @@ function deriveInsights(live) {
       impact: liq >= 250000 ? 'high' : 'medium',
     })
   }
-  if (live.cgRank) catalysts.push({ t: `Ranked #${live.cgRank} by market cap on CoinGecko`, eta: 'ongoing', impact: 'medium' })
-  if (live.watchers) catalysts.push({ t: `Tracked by ${live.watchers.toLocaleString()} CoinGecko watchlists`, eta: 'ongoing', impact: 'medium' })
+  if (live.cgRank) catalysts.push({ t: `Ranked #${live.cgRank} globally by market cap`, eta: 'ongoing', impact: 'medium' })
+  if (live.watchers) catalysts.push({ t: `Tracked on ${live.watchers.toLocaleString()} watchlists`, eta: 'ongoing', impact: 'medium' })
   if (live.categories?.[0]) catalysts.push({ t: `Narrative exposure: ${live.categories.slice(0, 3).join(' · ')}`, eta: 'ongoing', impact: 'medium' })
   if (age > 180) catalysts.push({ t: `Pool has survived ${Math.round(age)} days of live trading`, eta: 'ongoing', impact: 'low' })
   if (chg > 0) catalysts.push({ t: `Price up ${chg.toFixed(1)}% over 24h on ${money(vol)} of volume`, eta: 'today', impact: 'medium' })
@@ -345,7 +345,7 @@ function deriveInsights(live) {
   if (live.athChangePct && live.athChangePct < -90) {
     risks.push({ t: `Down ${Math.abs(live.athChangePct).toFixed(1)}% from its all-time high`, sev: 'medium' })
   }
-  if (!live.cgCoinId && !live.cgRank) risks.push({ t: 'Not indexed on CoinGecko — no independent fundamentals layer', sev: 'medium' })
+  if (!live.cgCoinId && !live.cgRank) risks.push({ t: 'No global listing yet — no independent fundamentals layer', sev: 'medium' })
   if (!risks.length) risks.push({ t: 'No structural red flags in the live market data', sev: 'low' })
 
   const buyPressure = trades ? buys / trades : 0.5

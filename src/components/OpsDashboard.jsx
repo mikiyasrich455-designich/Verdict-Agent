@@ -31,14 +31,14 @@ const LOGOS = {
   DOGE: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
 }
 
-// ── RYO skills the engine runs ───────────────────────────────────
-const RYO_TOOLS = [
-  { icon: ScanLine, label: 'scan_market' },
-  { icon: Radar, label: 'analyze_token' },
-  { icon: BrainCircuit, label: 'deep_analysis' },
-  { icon: Gauge, label: 'market_overview' },
-  { icon: GitCompareArrows, label: 'compare_tokens' },
-  { icon: Newspaper, label: 'sentiment_shift' },
+// ── agent skills the console runs ────────────────────────────────
+const AGENT_SKILLS = [
+  { icon: ScanLine, label: 'market scan' },
+  { icon: Radar, label: 'token analysis' },
+  { icon: BrainCircuit, label: 'deep analysis' },
+  { icon: Gauge, label: 'market regime' },
+  { icon: GitCompareArrows, label: 'side-by-side' },
+  { icon: Newspaper, label: 'sentiment drift' },
 ]
 
 // ── quick action chips + feature cards ───────────────────────────
@@ -262,11 +262,11 @@ export default function OpsDashboard() {
                 </div>
               </div>
 
-              {/* RYO skills */}
-              <div className="glass-panel rounded-2xl p-3">
-                <div className="px-2 pt-1 pb-2 text-[11px] font-semibold text-snow">RYO Skills</div>
-                <div className="space-y-0.5">
-                  {RYO_TOOLS.map(({ icon: Icon, label }) => (
+              {/* agent skills */}
+                <div className="glass-panel rounded-2xl p-3">
+                  <div className="px-2 pt-1 pb-2 text-[11px] font-semibold text-snow">Agent Skills</div>
+                  <div className="space-y-0.5">
+                    {AGENT_SKILLS.map(({ icon: Icon, label }) => (
                     <span key={label} className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
                       <span className="w-6 h-6 rounded-md bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-[#7c9bff] shrink-0">
                         <Icon size={12} />
