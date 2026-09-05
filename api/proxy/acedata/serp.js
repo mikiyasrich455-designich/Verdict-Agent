@@ -1,6 +1,6 @@
-import { rateLimit } from '../../lib/rateLimit.js'
-import { getCache, setCache } from '../../lib/cache.js'
-import { log, error } from '../../lib/logger.js'
+import { rateLimit } from '../../../lib/rateLimit.js'
+import { getCache, setCache } from '../../../lib/cache.js'
+import { log, error } from '../../../lib/logger.js'
 
 export default async function handler(req, res) {
   // CORS headers for cross-origin requests
