@@ -41,6 +41,13 @@ export function downloadDataUrl(url, filename) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  // The render CDNs don't send CORS headers, so the blob trick is out and browsers
+  // ignore `download` on a cross-origin link — without a new tab the click would
+  // navigate us away from the app mid-session.
+  if (/^https?:\/\//i.test(url) && !url.startsWith(window.location.origin)) {
+    a.target = '_blank'
+    a.rel = 'noopener'
+  }
   document.body.appendChild(a)
   a.click()
   a.remove()

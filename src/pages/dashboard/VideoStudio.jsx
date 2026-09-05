@@ -101,9 +101,9 @@ function VideoStudioInner({ token, pick }) {
               <p className="text-[12.5px] text-muted break-words">{script.tone}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="glass-chip"><Film size={11} /> {script.duration}s</span>
-              <span className="glass-chip">480p · 24fps</span>
-              <span className="glass-chip">MOTION POSTER</span>
+              <span className="glass-chip"><Film size={11} /> {script.duration} narration</span>
+              <span className="glass-chip">12s clip · 720p</span>
+              <span className="glass-chip">16:9 · WITH AUDIO</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
@@ -152,7 +152,7 @@ function VideoStudioInner({ token, pick }) {
 
           {phase === 'done' && output && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 mt-3">
-              <DownloadBtn onClick={() => download(output)} label="Download poster .svg" />
+              <DownloadBtn onClick={() => download(output)} label={`Download clip .${output.format || 'mp4'}`} />
               <span className="glass-chip">{output.duration}s</span>
               <span className="glass-chip">{output.resolution}</span>
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>

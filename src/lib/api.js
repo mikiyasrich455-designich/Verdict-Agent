@@ -246,13 +246,17 @@ export async function generateStudioVideo(symbol, verdict, onStatus) {
 
   if (!submitted.task_id) throw new Error('Video task was not queued — please try again')
 
-  // Poll the task status from the browser: every 4s, up to ~4 minutes.
+  // Poll the task status from the browser: every 4s, up to ~6 minutes
+  // (a 12s 720p clip measures ~2.5 min end to end).
   onStatus?.('Render queued — generating frames…')
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 90; i++) {
     await wait(4000)
 
     const statusRes = await fetch(`/api/proxy/acedata/video/status/${encodeURIComponent(submitted.task_id)}`)
     const status = await statusRes.json().catch(() => ({}))
+
+    const secs = (i + 1) * 4
+    onStatus?.(`Rendering… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} elapsed`)
 
     if (status.done && status.videoUrl) {
       onStatus?.('Render complete')
@@ -265,8 +269,6 @@ export async function generateStudioVideo(symbol, verdict, onStatus) {
       }
     }
     if (status.done && status.error) throw new Error(status.error)
-
-    if (i === 20) onStatus?.('Still rendering — this can take a minute or two…')
   }
 
   throw new Error('Video render timed out — please try again')
