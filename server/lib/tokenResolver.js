@@ -394,6 +394,17 @@ async function deepenFromTokenRecord(record) {
 }
 
 // ── pump.fun mints: the launchpad that issued the address always knows it ─────
+// Launchpad artwork is stored on IPFS, so it only renders in a browser once it is
+// rewritten to a gateway URL. "arrow://" is their marker for "no image uploaded".
+function artUrl(uri) {
+  const raw = String(uri || '').trim()
+  if (!raw || !/^https?:\/\//i.test(raw)) {
+    const cid = raw.replace(/^(ipfs:\/?\/?|ar:\/?\/?)/i, '')
+    return /^[A-Za-z0-9]{20,}$/.test(cid) ? `https://ipfs.io/ipfs/${cid}` : null
+  }
+  return raw
+}
+
 async function pumpFunProfile(ca) {
   const coin = await pumpCoin(ca)
   if (!coin || (!coin.name && !coin.symbol)) return null
@@ -415,7 +426,7 @@ async function pumpFunProfile(ca) {
     pairAddress: coin.pool_address || coin.market_id || null,
     poolAddress: coin.pool_address || coin.market_id || null,
     pairCreatedAt: num(coin.created_timestamp) || null,
-    logo: coin.image_uri || null,
+    logo: artUrl(coin.image_uri),
     banner: null,
     description: (coin.description || '').replace(/\s*\n\s*/g, ' ').trim() || null,
     websites: coin.website ? [coin.website] : [],
