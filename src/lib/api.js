@@ -3,6 +3,7 @@
 // Every function keeps the same signature the UI expects.
 
 import { identityForSymbol } from './activeToken'
+import { enrichProfile } from './tokenEnrich'
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -44,7 +45,9 @@ export async function resolveToken(q) {
     throw new Error(data.error || `Couldn't find "${q}" — check the address or name and try again`)
   }
 
-  return data
+  // The proxy shares one cloud egress IP that public market APIs throttle; the
+  // visitor's browser does not, so it tops up any branding/copy it couldn't get.
+  return enrichProfile(data)
 }
 
 export const ANALYSIS_STEPS = [
@@ -137,7 +140,7 @@ export async function fetchTokenProfile(symbol, identity) {
     throw new Error(err.error || 'Token profile failed')
   }
 
-  return res.json()
+  return enrichProfile(await res.json())
 }
 
 // POST /api/proxy/ryo/compare_tokens → normalized compare array

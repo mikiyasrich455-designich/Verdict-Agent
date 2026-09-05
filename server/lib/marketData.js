@@ -218,11 +218,14 @@ export function gtSearchPools(query) {
   )
 }
 
-export function gtPool(chain, poolAddress) {
+// Returns the full { data, included } document so callers can read relationships too
+// (e.g. include=base_token to learn a pool's real token name and logo).
+export function gtPool(chain, poolAddress, include) {
   const net = gtNetwork(chain)
   if (!net || !poolAddress) return Promise.resolve(null)
+  const q = include ? `?include=${encodeURIComponent(include)}` : ''
   return attempt(
-    () => httpJson(`${GT_BASE}/networks/${net}/pools/${encodeURIComponent(poolAddress)}`).then((d) => d?.data || null),
+    () => httpJson(`${GT_BASE}/networks/${net}/pools/${encodeURIComponent(poolAddress)}${q}`),
     `geckoterminal pool ${net}/${poolAddress}`
   )
 }

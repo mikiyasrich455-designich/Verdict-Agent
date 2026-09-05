@@ -14,6 +14,7 @@ import {
   dexSearch,
   gtTokenDetail,
   gtSearchPools,
+  gtPool,
   gtOhlcv,
   cgCoin,
   cgSearchByCa,
@@ -178,6 +179,11 @@ async function applyGeckoTerminal(profile) {
     profile.totalReserveUsd = num(attrs.total_reserve_in_usd) || null
     profile.cgCoinId = attrs.coingecko_coin_id || null
     if (num(attrs.price_usd)) profile.priceUsd = num(attrs.price_usd)
+    // A pool search names pairs, not projects ("ACE / SOL") — the token record wins.
+    if (attrs.name && (!profile.name || profile.name.includes('/') || profile.name === profile.symbol)) {
+      profile.name = String(attrs.name).trim()
+      profile.symbol = cleanSymbol(attrs.symbol) || profile.symbol
+    }
   }
 
   // Deepest GeckoTerminal pool wins the exchange label and the candle feed.
@@ -253,13 +259,22 @@ async function geckoFallback(ca) {
   const gtSlug = match.relationships?.network?.data?.id || String(match.id || '').split('_')[0]
   const chain = GT_SLUG_TO_CHAIN[gtSlug] || gtSlug
   const a = match.attributes || {}
+  const pairAddress = a.address || String(match.id || '').split('_').slice(1).join('_')
+
+  // A pool search only knows the pair ("ACE / SOL"). Ask the pool for its base
+  // token so the profile carries the real project name and logo, never a pair slug.
+  const pool = await gtPool(chain, pairAddress, 'base_token')
+  const baseToken = (Array.isArray(pool?.included) ? pool.included : []).find((i) => i?.type === 'token')
+  const bt = baseToken?.attributes || {}
+
   return {
-    symbol: cleanSymbol(a.name)?.split(' ')[0] || 'UNKNOWN',
-    name: a.name || 'Unknown',
+    symbol: cleanSymbol(bt.symbol) || cleanSymbol(String(a.name || '').split('/')[0]) || 'UNKNOWN',
+    name: bt.name || String(a.name || '').split('/')[0].trim() || 'Unknown',
     chain: chain || null,
     chainLabel: chainLabel(chain),
     ca,
     isCA: true,
+    decimals: Number.isFinite(Number(bt.decimals)) ? Number(bt.decimals) : null,
     priceUsd: num(a.base_token_price_usd ?? a.token_price_usd),
     change24h: num(a.price_change_percentage?.h24),
     marketCap: num(a.market_cap_usd) || num(a.fdv_usd),
@@ -268,14 +283,15 @@ async function geckoFallback(ca) {
     liquidityUsd: num(a.reserve_in_usd),
     exchange: prettyDex(match.relationships?.dex?.data?.id),
     exchangeId: match.relationships?.dex?.data?.id || null,
-    pairAddress: a.address || String(match.id || '').split('_').slice(1).join('_'),
+    pairAddress,
+    poolAddress: pairAddress,
     pairName: a.name || null,
     pairCreatedAt: a.pool_created_at ? Date.parse(a.pool_created_at) : null,
     buys24h: num(a.transactions?.h24?.buys),
     sells24h: num(a.transactions?.h24?.sells),
-    logo: null,
-    banner: null,
-    socials: [],
+    logo: bt.image_url || null,
+    banner: bt.banner_url || null,
+    socials: Array.isArray(bt.socials) ? bt.socials : [],
     websites: [],
     description: null,
     categories: [],
@@ -350,6 +366,59 @@ async function applyCoinGecko(profile) {
   return profile
 }
 
+// ── Stale-while-error ────────────────────────────────────────────────────────
+// Public data APIs rate-limit shared cloud IPs hard. Anything we have once
+// confirmed about a contract's identity, artwork or copy is kept for hours, so a
+// momentary 403/429 upstream can never turn the profile back into a bare number.
+const STICKY_FIELDS = [
+  'logo', 'banner', 'description', 'categories', 'socials', 'websites', 'website',
+  'whitepaper', 'explorer', 'twitter', 'telegram', 'github',
+  'cgCoinId', 'cgUrl', 'cgRank', 'watchers', 'decimals',
+]
+const PAIR_LIKE_NAME = /^[\w.$-]{1,16}\s+\/\s+[\w.$-]{1,16}$/
+const stickyByCa = new Map()
+const STICKY_TTL = 6 * 60 * 60 * 1000
+
+const isBlank = (v) =>
+  v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)
+
+function stickyKey(profile) {
+  return `${profile.chain || '?'}:${String(profile.ca || '').toLowerCase()}`
+}
+
+function rememberSticky(profile) {
+  if (!profile.ca) return
+  const bag = { at: Date.now(), fields: {} }
+  for (const f of STICKY_FIELDS) if (!isBlank(profile[f])) bag.fields[f] = profile[f]
+  if (profile.name && !PAIR_LIKE_NAME.test(profile.name)) bag.fields.name = profile.name
+  if (profile.symbol && profile.symbol !== 'UNKNOWN') bag.fields.symbol = profile.symbol
+  stickyByCa.set(stickyKey(profile), bag)
+  if (stickyByCa.size > 400) {
+    for (const [k, v] of stickyByCa) {
+      if (Date.now() - v.at > STICKY_TTL) stickyByCa.delete(k)
+      else if (stickyByCa.size < 300) break
+    }
+  }
+}
+
+function restoreSticky(profile) {
+  const bag = stickyByCa.get(stickyKey(profile))
+  if (!bag || Date.now() - bag.at > STICKY_TTL) return
+  let restored = false
+  for (const [f, v] of Object.entries(bag.fields)) {
+    if (isBlank(profile[f])) {
+      profile[f] = v
+      restored = true
+    }
+  }
+  if (!profile.name || PAIR_LIKE_NAME.test(profile.name)) {
+    profile.name = bag.fields.name || profile.name
+    restored = true
+  }
+  if (!profile.symbol || profile.symbol === 'UNKNOWN') profile.symbol = bag.fields.symbol || profile.symbol
+  if (restored) profile.stickyEnrichment = true
+}
+
 // Shared tail: everything found by CA or by search gets the same enrichment.
 async function hydrate(profile, candidates) {
   if (profile.ca) {
@@ -363,6 +432,12 @@ async function hydrate(profile, candidates) {
     } catch (err) {
       console.warn('[tokenResolver] coingecko enrichment skipped:', err.message)
     }
+    restoreSticky(profile)
+    rememberSticky(profile)
+  }
+
+  if (PAIR_LIKE_NAME.test(String(profile.name || ''))) {
+    profile.name = String(profile.name).split('/')[0].trim()
   }
 
   profile.pairAgeDays = ageInDays(profile.pairCreatedAt)
