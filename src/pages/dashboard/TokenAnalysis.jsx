@@ -259,7 +259,23 @@ export default function TokenAnalysis() {
 
   if (status !== 'ready' || !data) return <Loading />
 
-  const p = data
+  let p
+  try {
+    p = data
+    // Force a synchronous read to surface any shape issues early
+    void p.marketCap
+    void p.volume24h
+  } catch (err) {
+    console.error('[TOKEN-ANALYSIS] Data shape error:', err)
+    return (
+      <ErrorState error={err} onRetry={rerun}>
+        <p className="text-[11.5px] text-faint font-mono">
+          {ca ? `contract ${ca}` : `query ${token}`} — the live feed returned unexpected data
+        </p>
+      </ErrorState>
+    )
+  }
+
   const volToCap = p.marketCap ? (p.volume24h / p.marketCap) * 100 : null
   const buys = Number(p.buys24h) || 0
   const sells = Number(p.sells24h) || 0
@@ -461,14 +477,17 @@ export default function TokenAnalysis() {
             }
           >
             <ul className="space-y-2.5">
-              {(view === 'catalysts' ? p.catalysts || [] : p.risks || []).map((c, i) => (
-                <li key={i} className="flex items-start gap-2.5 text-[13px] text-snow/75 leading-relaxed">
-                  {view === 'catalysts'
-                    ? <Check size={13} className="text-success mt-1 flex-shrink-0" />
-                    : <AlertTriangle size={13} className="text-danger mt-1 flex-shrink-0" />}
-                  <span>{c}</span>
-                </li>
-              ))}
+              {(view === 'catalysts' ? p.catalysts || [] : p.risks || []).map((c, i) => {
+                const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
+                return (
+                  <li key={i} className="flex items-start gap-2.5 text-[13px] text-snow/75 leading-relaxed">
+                    {view === 'catalysts'
+                      ? <Check size={13} className="text-success mt-1 flex-shrink-0" />
+                      : <AlertTriangle size={13} className="text-danger mt-1 flex-shrink-0" />}
+                    <span>{text}</span>
+                  </li>
+                )
+              })}
               {(view === 'catalysts' ? p.catalysts || [] : p.risks || []).length === 0 && (
                 <li className="text-[13px] text-faint">Nothing material flagged on this asset right now.</li>
               )}
