@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import VerdictBadge from '../../components/VerdictBadge'
 import { useAgentData } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioVideo } from '../../lib/api'
-import { PageHeader, Panel, EmptyState, friendlyError } from '../../components/DashUI'
+import { PageHeader, Panel, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
 import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
 
@@ -35,6 +35,17 @@ function VideoStudioInner({ token, pick }) {
           hint="Enter a token on the Your Token page or use the search bar above to begin."
           action={<a href="/dashboard" className="glass-btn">Go to Your Token</a>}
         />
+      </>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <>
+        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
+        <ErrorState error={data} onRetry={() => window.location.reload()}>
+          <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
+        </ErrorState>
       </>
     )
   }

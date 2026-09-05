@@ -34,28 +34,36 @@ export default function Council() {
     setSaved(false)
     setPhase('collecting')
 
-    fetchDebate(token).then((d) => {
-      if (!alive) return
-      setData(d)
-      sleep(1000).then(() => {
+    fetchDebate(token)
+      .then((d) => {
         if (!alive) return
-        setPhase('debating')
-        ;(async () => {
-          for (let i = 0; i < d.messages.length; i++) {
-            if (!alive) return
-            setTyping(d.messages[i].role)
-            await sleep(900)
-            if (!alive) return
-            setTyping(null)
-            setVisible(i + 1)
-            await sleep(1000)
-          }
+        setData(d)
+        sleep(1000).then(() => {
           if (!alive) return
-          await sleep(500)
-          if (alive) setPhase('judged')
-        })()
+          setPhase('debating')
+          ;(async () => {
+            const msgs = Array.isArray(d?.messages) ? d.messages : []
+            for (let i = 0; i < msgs.length; i++) {
+              if (!alive) return
+              setTyping(msgs[i].role)
+              await sleep(900)
+              if (!alive) return
+              setTyping(null)
+              setVisible(i + 1)
+              await sleep(1000)
+            }
+            if (!alive) return
+            await sleep(500)
+            if (alive) setPhase('judged')
+          })()
+        })
       })
-    })
+      .catch((err) => {
+        if (!alive) return
+        console.error('[COUNCIL] fetch failed:', err)
+        setData(null)
+        setPhase('error')
+      })
 
     return () => {
       alive = false
@@ -78,6 +86,20 @@ export default function Council() {
           hint="Enter a token on the Your Token page or use the search bar above to begin."
           action={<a href="/dashboard" className="glass-btn">Go to Your Token</a>}
         />
+      </>
+    )
+  }
+
+  if (phase === 'error') {
+    return (
+      <>
+        <PageHeader icon={Swords} title={`Council · ${token.toUpperCase()}`} subtitle="Summoning the council…" source={{ mode: 'ai', name: 'adversarial debate' }} />
+        <div className="glass-panel !py-8 !px-5 flex flex-col items-center text-center gap-3">
+          <p className="text-[13px] text-snow/85 max-w-sm">The council couldn't fetch the debate evidence. Try again in a moment.</p>
+          <button onClick={() => setRunKey((k) => k + 1)} className="glass-btn !py-2 !px-4 text-[12px]">
+            <RefreshCw size={12} className="mr-1.5" /> Retry
+          </button>
+        </div>
       </>
     )
   }

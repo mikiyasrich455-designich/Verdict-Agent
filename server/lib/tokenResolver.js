@@ -83,6 +83,22 @@ function prettyDex(dexId) {
 }
 
 /**
+ * Links arrive as bare strings from one indexer and {url, app_name} objects from
+ * another. The UI renders them as labelled chips, so settle on a single shape here
+ * instead of teaching every consumer about all three.
+ */
+function normSites(list) {
+  const out = []
+  for (const w of Array.isArray(list) ? list : []) {
+    const url = typeof w === 'string' ? w : w?.url
+    if (!url) continue
+    const label = (w && typeof w === 'object' && (w.label || w.app_name)) || 'Website'
+    out.push({ url, label })
+  }
+  return out
+}
+
+/**
  * Collapse DexScreener's flat pair list into one entry per (chain, contract).
  * This is what stops a ticker collision: Fusionist and Ace Data Cloud share "ACE"
  * but never share an address, so they land in different groups ranked by liquidity.
@@ -136,7 +152,7 @@ function identityFromPair(pair) {
     logo: info.imageUrl || null,
     banner: info.header || null,
     socials: Array.isArray(info.socials) ? info.socials : [],
-    websites: Array.isArray(info.websites) ? info.websites : [],
+    websites: normSites(info.websites),
     description: null,
     categories: [],
   }
@@ -329,7 +345,7 @@ async function gtTokenProfile(ca, preferredChain) {
       (x, y) => num(y?.attributes?.reserve_in_usd) - num(x?.attributes?.reserve_in_usd)
     )[0]
     const pa = deepest?.attributes || {}
-    const websites = (info.websites || []).filter(Boolean)
+    const sites = normSites(info.websites)
     const socials = []
     if (info.twitter_handle) socials.push({ type: 'twitter', url: `https://x.com/${info.twitter_handle}` })
     if (info.telegram_handle) socials.push({ type: 'telegram', url: `https://t.me/${info.telegram_handle}` })
@@ -362,8 +378,9 @@ async function gtTokenProfile(ca, preferredChain) {
       banner: a.banner_image_url || null,
       cgCoinId: a.coingecko_coin_id || null,
       description: (info.description || '').replace(/\s*\n\s*/g, ' ').trim() || null,
-      websites: websites.slice(0, 4),
-      whitepaper: websites.find((u) => /whitepaper|pdf/i.test(u)) || null,
+      websites: sites.slice(0, 4),
+      website: sites[0]?.url || null,
+      whitepaper: sites.find((s) => /whitepaper|\.pdf/i.test(s.url))?.url || null,
       socials,
       categories: [],
       resolved: true,
@@ -411,6 +428,13 @@ async function pumpFunProfile(ca) {
   const socials = []
   if (coin.twitter) socials.push({ type: 'twitter', url: coin.twitter })
   if (coin.telegram) socials.push({ type: 'telegram', url: coin.telegram })
+  // The launchpad reports supply in base units, so the price has to come from the
+  // decimal-adjusted amount or every brand-new mint reads as a fraction of a cent.
+  const decimals = Number.isFinite(Number(coin.decimals)) ? Number(coin.decimals) : 6
+  const rawSupply = num(coin.total_supply)
+  const supply = rawSupply ? rawSupply / 10 ** decimals : 0
+  const marketCap = num(coin.usd_market_cap)
+  const site = typeof coin.website === 'string' ? coin.website.trim() : ''
   return {
     symbol: cleanSymbol(coin.symbol) || 'UNKNOWN',
     name: coin.name || coin.symbol || 'Unknown',
@@ -418,10 +442,10 @@ async function pumpFunProfile(ca) {
     chainLabel: chainLabel('solana'),
     ca,
     isCA: true,
-    decimals: Number.isFinite(Number(coin.decimals)) ? Number(coin.decimals) : 6,
-    priceUsd: num(coin.usd_market_cap) && num(coin.total_supply) ? num(coin.usd_market_cap) / num(coin.total_supply) : 0,
-    marketCap: num(coin.usd_market_cap),
-    totalSupply: num(coin.total_supply),
+    decimals,
+    priceUsd: supply && marketCap ? marketCap / supply : 0,
+    marketCap,
+    totalSupply: supply,
     exchange: coin.raydium_pool ? 'Raydium' : 'pump.fun bonding curve',
     pairAddress: coin.pool_address || coin.market_id || null,
     poolAddress: coin.pool_address || coin.market_id || null,
@@ -429,7 +453,8 @@ async function pumpFunProfile(ca) {
     logo: artUrl(coin.image_uri),
     banner: null,
     description: (coin.description || '').replace(/\s*\n\s*/g, ' ').trim() || null,
-    websites: coin.website ? [coin.website] : [],
+    website: site || null,
+    websites: site ? [{ url: site, label: 'Website' }] : [],
     socials,
     categories: [],
     ath: num(coin.ath_market_cap) || undefined,
@@ -470,9 +495,10 @@ async function applyCoinGecko(profile) {
   profile.description = (coin.description && coin.description.en) || profile.description
   profile.categories = Array.isArray(coin.categories) ? coin.categories.filter(Boolean).slice(0, 6) : []
   profile.logo = coin.image?.large || coin.image?.small || profile.logo
-  profile.website = (links.homepage || []).find(Boolean) || null
-  profile.whitepaper = links.whitepaper || null
-  profile.explorer = (links.blockchain_site || []).find(Boolean) || null
+  profile.website = (links.homepage || []).find(Boolean) || profile.website || null
+  profile.websites = normSites(links.homepage).length ? normSites(links.homepage).slice(0, 4) : profile.websites || []
+  profile.whitepaper = links.whitepaper || profile.whitepaper || null
+  profile.explorer = (links.blockchain_site || []).find(Boolean) || profile.explorer || null
   profile.twitter = links.twitter_screen_name ? `https://x.com/${links.twitter_screen_name}` : null
   profile.telegram = links.telegram_channel_identifier ? `https://t.me/${links.telegram_channel_identifier}` : null
   profile.github = (links.repos_url?.github || []).find(Boolean) || null

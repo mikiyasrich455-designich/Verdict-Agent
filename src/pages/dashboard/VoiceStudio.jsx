@@ -48,11 +48,13 @@ function VoiceStudioInner({ token, pick }) {
     )
   }
 
-  if (status !== 'ready' || !script) {
+  if (status === 'error') {
     return (
       <>
         <PageHeader icon={Mic} title="Studio · Voice" subtitle="Turn a verdict into spoken narration." source={{ mode: 'live', name: 'TTS voice' }} />
-        <PageSkeleton />
+        <ErrorState error={data} onRetry={() => window.location.reload()}>
+          <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
+        </ErrorState>
       </>
     )
   }
@@ -63,18 +65,24 @@ function VoiceStudioInner({ token, pick }) {
     setPhase('generating')
     setProgress(0)
     setOutput(null)
-    const res = await generateStudioVoice(script, { onProgress: setProgress })
-    const entry = {
-      symbol: script.symbol,
-      verdict: script.verdict,
-      script: res.script,
-      tone: res.tone,
-      duration: res.duration,
-      format: res.format,
+    try {
+      const res = await generateStudioVoice(script, { onProgress: setProgress })
+      const entry = {
+        symbol: script.symbol,
+        verdict: script.verdict,
+        script: res.script,
+        tone: res.tone,
+        duration: res.duration,
+        format: res.format,
+      }
+      setOutput(entry)
+      history.push(entry)
+      setPhase('done')
+    } catch (err) {
+      console.error('[VOICE-GEN] Error:', err)
+      setError(err.message || 'Voice generation failed')
+      setPhase('idle')
     }
-    setOutput(entry)
-    history.push(entry)
-    setPhase('done')
   }
 
   const togglePlay = (item) => {

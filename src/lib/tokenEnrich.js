@@ -67,8 +67,10 @@ async function fromDexScreener(p) {
     logo: info.imageUrl,
     banner: info.header,
     socials: info.socials,
-    websites: info.websites,
-    website: (info.websites || []).map((w) => w?.url).find(Boolean),
+    websites: (info.websites || []).map((w) =>
+      typeof w === 'string' ? { url: w, label: 'Website' } : { url: w?.url, label: w?.label || w?.app_name || 'Website' }
+    ),
+    website: (info.websites || []).map((w) => (typeof w === 'string' ? w : w?.url)).find(Boolean),
     dexUrl: best.url,
     pairName: best.pairName,
     quoteSymbol: best.quoteToken?.symbol,

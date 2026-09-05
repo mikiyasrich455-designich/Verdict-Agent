@@ -29,10 +29,10 @@ function identityInput(body) {
 }
 
 export async function resolveCaInBody(req, res, next) {
-  const target = identityInput(req.body)
-  if (!target) return next()
-
   try {
+    const target = identityInput(req.body)
+    if (!target) return next()
+
     const live = await resolveToken(target.input)
     req.tokenIdentity = live
     req.body = {
@@ -46,7 +46,9 @@ export async function resolveCaInBody(req, res, next) {
   } catch (err) {
     // A contract address that resolves to nothing is a real error — answering with a
     // same-ticker lookalike would be worse than failing.
-    if (target.fromCA) return res.status(404).json({ error: err.message })
+    if (req.body?.ca || extractContractAddress(req.body?.symbol) || extractContractAddress(req.body?.q)) {
+      return res.status(404).json({ error: err.message || 'Token not found' })
+    }
     next()
   }
 }
