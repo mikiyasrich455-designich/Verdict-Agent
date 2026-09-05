@@ -6,20 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, ArrowRight, Crosshair } from 'lucide-react'
 import TokenSearch from '../../components/TokenSearch'
 import { PageHeader } from '../../components/DashUI'
-
-function normalizeTokenInput(raw) {
-  const input = String(raw || '').trim()
-  const CA_RE = /^0x[a-fA-F0-9]{8,}$/
-  if (CA_RE.test(input)) {
-    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-    let t = ''
-    const seed = input.charCodeAt(0) || 1
-    for (let i = 0; i < 4; i++) t += A[(seed * (i + 1) * 7) % A.length]
-    return { isCA: true, ca: input, symbol: t, key: input.toLowerCase() }
-  }
-  const symbol = (input.toUpperCase().match(/[A-Z0-9]{1,10}/) || ['UNKNOWN'])[0]
-  return { isCA: false, ca: null, symbol, key: symbol }
-}
+import { resolveTokenInput } from '../../components/DashboardShell'
 
 const WORDS = ['Bitcoin', 'Ethereum', 'Solana', 'every token', 'every chain', 'every narrative']
 
@@ -45,10 +32,22 @@ export default function YourToken() {
     return () => clearInterval(interval)
   }, [])
 
-  const go = (raw) => {
-    const { symbol } = normalizeTokenInput(raw)
-    if (!symbol) return
-    navigate(`/dashboard/analysis?token=${symbol}`)
+  const [resolving, setResolving] = useState(false)
+  const [resolveErr, setResolveErr] = useState('')
+
+  const go = async (raw) => {
+    const input = String(raw || '').trim()
+    if (!input || resolving) return
+    setResolveErr('')
+    setResolving(true)
+    try {
+      const symbol = await resolveTokenInput(input)
+      setResolving(false)
+      navigate(`/dashboard/analysis?token=${symbol}`)
+    } catch (err) {
+      setResolving(false)
+      setResolveErr(err.message || 'Could not resolve that token')
+    }
   }
 
   const tokenPath = (to) => (token ? `${to}?token=${token}` : to)
@@ -94,7 +93,17 @@ export default function YourToken() {
           Drop your token. Research, Council, Narrative, Studio — everything runs on it.
         </p>
 
-        <TokenSearch placeholder="Drop your token — ticker or contract address…" onSubmit={go} />
+        <TokenSearch placeholder="Drop your token — ticker, name, or contract address…" onSubmit={go} />
+        {resolving && (
+          <p className="mt-4 text-[12px] font-mono text-accent animate-pulse">
+            Finding your token live…
+          </p>
+        )}
+        {resolveErr && (
+          <p className="mt-4 inline-block text-[12px] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-1.5">
+            {resolveErr}
+          </p>
+        )}
       </motion.div>
 
       {/* active token strip */}

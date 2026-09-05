@@ -7,12 +7,14 @@ import TokenSearch from '../components/TokenSearch'
 import VerdictCard, { ShareCard, POINT_LABELS } from '../components/VerdictCard'
 import ReasoningPanel from '../components/ReasoningPanel'
 import { fetchVerdict } from '../lib/api'
+import { resolveTokenInput } from '../components/DashboardShell'
 
 export default function VerdictPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [state, setState] = useState('idle') // idle | loading | done
+  const [state, setState] = useState('idle') // idle | loading | done | error
   const [verdict, setVerdict] = useState(null)
+  const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const cardRef = useRef(null)
@@ -31,18 +33,24 @@ export default function VerdictPage() {
   }, [state])
 
   const runAnalysis = useCallback(
-    async (symbol) => {
+    async (rawInput) => {
       if (runningRef.current) return
       runningRef.current = true
       setState('loading')
       setVerdict(null)
+      setError('')
       setElapsed(0)
       startTimeRef.current = Date.now()
-      setSearchParams({ token: symbol }, { replace: true })
       try {
+        // Resolve CA / name / ticker to a live ticker before running the verdict
+        const symbol = await resolveTokenInput(rawInput)
+        setSearchParams({ token: symbol }, { replace: true })
         const result = await fetchVerdict(symbol)
         setVerdict(result)
         setState('done')
+      } catch (err) {
+        setError(err.message || 'Analysis failed — try again')
+        setState('error')
       } finally {
         runningRef.current = false
       }
@@ -134,6 +142,24 @@ export default function VerdictPage() {
               <p className="mt-4 text-faint text-xs font-mono">
                 GATHERING DATA FROM RYO + LIVE SERP · AI REASONING
               </p>
+            </motion.div>
+          )}
+
+          {state === 'error' && (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="py-10 text-center"
+            >
+              <div className="glass-panel max-w-md mx-auto px-6 py-8">
+                <p className="text-[13px] text-red-300 mb-1">Couldn't get a verdict</p>
+                <p className="text-[12px] text-muted mb-6">{error}</p>
+                <button onClick={reset} className="btn-primary px-5 py-2.5 text-sm">
+                  <RotateCcw className="w-4 h-4" /> Try Another Token
+                </button>
+              </div>
             </motion.div>
           )}
 

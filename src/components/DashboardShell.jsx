@@ -11,19 +11,24 @@ import {
   Search, Sparkles, CornerDownLeft,
 } from 'lucide-react'
 import Logo from './Logo'
+import { resolveToken } from '../lib/api'
 
-function normalizeTokenInput(raw) {
+// Plain tickers that DexScreener may not know (e.g. BTC, ETH) still work
+// downstream via RYO — let those through unverified.
+const TICKER_LIKE = /^[A-Za-z][A-Za-z0-9.$_-]{0,11}$/
+
+export async function resolveTokenInput(raw) {
   const input = String(raw || '').trim()
-  const CA_RE = /^0x[a-fA-F0-9]{8,}$/
-  if (CA_RE.test(input)) {
-    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-    let t = ''
-    const seed = input.charCodeAt(0) || 1
-    for (let i = 0; i < 4; i++) t += A[(seed * (i + 1) * 7) % A.length]
-    return { isCA: true, ca: input, symbol: t, key: input.toLowerCase() }
+  if (!input) throw new Error('Enter a token, name, or contract address')
+  try {
+    const data = await resolveToken(input)
+    return data.symbol || input.toUpperCase()
+  } catch (err) {
+    if (TICKER_LIKE.test(input) && !/[1-9A-HJ-NP-Za-km-z]{32,}/.test(input)) {
+      return input.toUpperCase()
+    }
+    throw err
   }
-  const symbol = (input.toUpperCase().match(/[A-Z0-9]{1,10}/) || ['UNKNOWN'])[0]
-  return { isCA: false, ca: null, symbol, key: symbol }
 }
 
 // ── the skill tree (groups → skills) ────────────────────────────
@@ -225,19 +230,30 @@ function Topbar({ onMenu }) {
     }
   }, [pathname, focusToken, setSearchParams])
 
-  const submit = (e) => {
+  const [resolving, setResolving] = useState(false)
+  const [resolveErr, setResolveErr] = useState('')
+
+  const submit = async (e) => {
     e.preventDefault()
     const raw = query.trim()
-    if (!raw) return
-    const { symbol } = normalizeTokenInput(raw)
-    setQuery('')
-    if (TOKEN_SCOPED.includes(pathname)) {
-      setSearchParams((prev) => {
-        prev.set('token', symbol)
-        return prev
-      })
-    } else {
-      navigate(`/dashboard/analysis?token=${symbol}`)
+    if (!raw || resolving) return
+    setResolveErr('')
+    setResolving(true)
+    try {
+      const symbol = await resolveTokenInput(raw)
+      setQuery('')
+      setResolving(false)
+      if (TOKEN_SCOPED.includes(pathname)) {
+        setSearchParams((prev) => {
+          prev.set('token', symbol)
+          return prev
+        })
+      } else {
+        navigate(`/dashboard/analysis?token=${symbol}`)
+      }
+    } catch (err) {
+      setResolving(false)
+      setResolveErr(err.message || 'Could not resolve that token')
     }
   }
 
@@ -266,21 +282,30 @@ function Topbar({ onMenu }) {
       </div>
 
       {/* global token search */}
-      <form onSubmit={submit} className="flex-1 max-w-[420px] ml-auto md:ml-0">
-        <div className="glass-input flex items-center gap-2 !py-2">
+      <form onSubmit={submit} className="flex-1 max-w-[420px] ml-auto md:ml-0 relative">
+        <div className={`glass-input flex items-center gap-2 !py-2 ${resolveErr ? '!border-red-400/50' : ''}`}>
           <Search size={14} className="text-faint flex-shrink-0" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Drop a token or CA…"
+            onChange={(e) => { setQuery(e.target.value); setResolveErr('') }}
+            placeholder="Drop a token, name, or CA…"
             className="flex-1 bg-transparent outline-none text-[13px] text-snow placeholder:text-faint min-w-0"
           />
-          {query && (
-            <button type="submit" className="text-faint hover:text-accent transition-colors" aria-label="Focus token">
-              <CornerDownLeft size={13} />
-            </button>
+          {resolving ? (
+            <span className="w-3.5 h-3.5 rounded-full border-2 border-accent/30 border-t-accent animate-spin flex-shrink-0" />
+          ) : (
+            query && (
+              <button type="submit" className="text-faint hover:text-accent transition-colors" aria-label="Focus token">
+                <CornerDownLeft size={13} />
+              </button>
+            )
           )}
         </div>
+        {resolveErr && (
+          <div className="absolute top-full left-0 mt-1.5 z-50 max-w-full text-[11px] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-1.5 shadow-lg">
+            {resolveErr}
+          </div>
+        )}
       </form>
 
       {focusToken && (

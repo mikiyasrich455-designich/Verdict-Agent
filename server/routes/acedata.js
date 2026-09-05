@@ -194,10 +194,39 @@ router.post('/image', async (req, res) => {
   }
 })
 
-// POST /api/proxy/acedata/video — Seedance video generation
-// Cheapest: doubao-seedance-1-0-lite-t2v-250428 ($0.008/sec, 2-12s)
-// Better: doubao-seedance-2-0-mini-260615 ($0.008/sec, 4-15s)
-// Polling: GET /seedance/tasks/{task_id}
+// ── Seedance video — ASYNC task flow (never hold one HTTP request open) ──
+// POST /video          → creates the task, returns { task_id } immediately
+// GET  /video/status/:id → one upstream poll, returns { done, videoUrl, posterUrl, status }
+// The old design polled for up to 2 min inside a single request — Render's
+// request timeout killed it, so the UI spun forever.
+
+// Pull the video/poster URLs out of any of the shapes AceData may return.
+function extractVideoUrls(payload) {
+  const videoUrl =
+    payload?.video_url ||
+    payload?.data?.video_url ||
+    payload?.result_url ||
+    payload?.videoUrl ||
+    payload?.data?.[0]?.url ||
+    payload?.data?.result?.video_url ||
+    null
+  const posterUrl =
+    payload?.poster_url ||
+    payload?.cover_url ||
+    payload?.last_frame_url ||
+    payload?.data?.poster_url ||
+    payload?.data?.last_frame_url ||
+    payload?.data?.[0]?.poster_url ||
+    null
+  if (videoUrl || posterUrl) return { videoUrl, posterUrl }
+
+  // Fallback: scan the whole JSON blob for hosted .mp4 / cover URLs
+  const json = JSON.stringify(payload || {})
+  const mp4 = json.match(/https?:\/\/[^"'\\\s]+\.mp4[^"'\\\s]*/)
+  const cover = json.match(/https?:\/\/[^"'\\\s]+(?:cover|poster|thumbnail)[^"'\\\s]*/)
+  return { videoUrl: mp4 ? mp4[0] : null, posterUrl: cover ? cover[0] : null }
+}
+
 router.post('/video', async (req, res) => {
   const start = Date.now()
   const { prompt, duration = 5, resolution = '720p', ratio = '16:9' } = req.body
@@ -209,40 +238,6 @@ router.post('/video', async (req, res) => {
     return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
   }
 
-  // Helper: poll for task result
-  async function pollTask(taskId, maxAttempts = 40, pollInterval = 3000) {
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, pollInterval))
-      const pollRes = await fetch(`${process.env.ACEDATA_BASE}/seedance/tasks/${taskId}`, {
-        headers: { 'Authorization': `Bearer ${process.env.ACEDATA_KEY}` },
-      })
-      if (!pollRes.ok) continue
-
-      const pollData = await pollRes.json()
-
-      // Success: has video_url
-      if (pollData.data?.video_url) {
-        return pollData
-      }
-
-      // Error status
-      if (pollData.error) {
-        throw new Error(`Video generation error: ${pollData.error}`)
-      }
-
-      // Check if task is still processing
-      if (pollData.status === 'completed' || pollData.status === 'succeeded') {
-        return pollData
-      }
-
-      // Timeout after maxAttempts
-      if (i === maxAttempts - 1) {
-        throw new Error(`Video generation timed out after ${maxAttempts * pollInterval / 1000}s. Task status: ${pollData.status || 'unknown'}`)
-      }
-    }
-    throw new Error('Video generation timed out')
-  }
-
   try {
     const url = `${process.env.ACEDATA_BASE}/seedance/videos`
     const headers = {
@@ -250,63 +245,114 @@ router.post('/video', async (req, res) => {
       'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
     }
 
-    // Try cheapest model first: 1.0 Lite T2V (2-12s)
+    const submitBody = (model, maxDur) => ({
+      model,
+      content: [{ type: 'text', text: prompt }],
+      resolution,
+      ratio,
+      duration: Math.min(duration, maxDur),
+      generate_audio: true,
+    })
+
+    // Try cheapest model first: 1.0 Lite T2V (2-12s), fallback 2.0 Mini (4-15s)
     let fetchRes = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: 'doubao-seedance-1-0-lite-t2v-250428',
-        content: [{ type: 'text', text: prompt }],
-        resolution,
-        ratio,
-        duration: Math.min(duration, 12),
-        generate_audio: true,
-      }),
+      body: JSON.stringify(submitBody('doubao-seedance-1-0-lite-t2v-250428', 12)),
     })
 
-    // If 1.0 Lite fails, try 2.0 Mini (4-15s)
+    let firstStatus = fetchRes.status
+    let firstText = ''
     if (!fetchRes.ok) {
-      const text = await fetchRes.text()
-      console.log('[VIDEO] 1.0 Lite failed, trying 2.0 Mini:', fetchRes.status, text)
+      firstText = await fetchRes.text()
+      console.log('[VIDEO] 1.0 Lite failed, trying 2.0 Mini:', firstStatus, firstText)
 
       fetchRes = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: 'doubao-seedance-2-0-mini-260615',
-          content: [{ type: 'text', text: prompt }],
-          resolution,
-          ratio,
-          duration: Math.min(duration, 15),
-          generate_audio: true,
-        }),
+        body: JSON.stringify(submitBody('doubao-seedance-2-0-mini-260615', 15)),
       })
 
       if (!fetchRes.ok) {
         const text2 = await fetchRes.text()
-        throw new Error(`Video generation failed: both models failed (1.0 Lite: ${fetchRes.status}, 2.0 Mini: ${fetchRes.status}). ${text2}`)
+        throw new Error(`Video submit failed (1.0 Lite: ${firstStatus} ${firstText.slice(0, 120)} | 2.0 Mini: ${fetchRes.status} ${text2.slice(0, 120)})`)
       }
     }
 
     const data = await fetchRes.json()
 
-    // Extract task ID — AceData may use 'id' or 'task_id'
-    if (data.id || data.task_id) {
-      const taskId = data.id || data.task_id
-      console.log('[VIDEO] Task created:', taskId, 'Polling...')
-
-      const result = await pollTask(taskId, 40, 3000) // max 2 min
-
-      log('POST', '/acedata/video', 200, Date.now() - start)
-      return res.json(result)
+    // Task-based response → hand the id to the client, it polls /video/status
+    const taskId = data.id || data.task_id || data.data?.task_id || data.data?.id
+    if (taskId) {
+      console.log('[VIDEO] Task created:', taskId)
+      log('POST', '/acedata/video', 200, Date.now() - start, '(queued)')
+      return res.json({ queued: true, task_id: taskId })
     }
 
-    // Direct response (some models return immediately)
-    log('POST', '/acedata/video', 200, Date.now() - start)
-    res.json(data)
+    // Direct response (already rendered)
+    const { videoUrl, posterUrl } = extractVideoUrls(data)
+    log('POST', '/acedata/video', 200, Date.now() - start, '(direct)')
+    res.json({ queued: false, done: true, videoUrl, posterUrl, raw: data })
   } catch (err) {
     error('video', err)
-    res.status(500).json({ error: err.message })
+    res.status(502).json({ error: err.message })
+  }
+})
+
+// GET /api/proxy/acedata/video/status/:taskId — single upstream poll, returns fast
+// AceData queries async tasks with POST /seedance/tasks { id, action: "retrieve" }
+// (a GET on /seedance/tasks/:id 404s — that was the "video keeps loading" bug).
+router.get('/video/status/:taskId', async (req, res) => {
+  const start = Date.now()
+  const taskId = String(req.params.taskId || '').replace(/[^A-Za-z0-9_-]/g, '')
+  if (!taskId) return res.status(400).json({ error: 'taskId required' })
+
+  try {
+    const pollRes = await fetch(`${process.env.ACEDATA_BASE}/seedance/tasks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${process.env.ACEDATA_KEY}`,
+      },
+      body: JSON.stringify({ id: taskId, action: 'retrieve' }),
+      timeout: 15000,
+    })
+
+    if (!pollRes.ok) {
+      const text = await pollRes.text()
+      console.log('[VIDEO] poll HTTP', pollRes.status, text.slice(0, 160))
+      if (pollRes.status === 404) {
+        return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
+      }
+      // Transient upstream hiccups shouldn't kill the client poll loop
+      return res.json({ done: false, status: `poll_${pollRes.status}` })
+    }
+
+    const data = await pollRes.json()
+    // Shape: { id, status?, response: { success, data: { status, video_url, last_frame_url } } }
+    const inner = data.response?.data || data.data || data
+    const status = String(inner.status || data.status || 'unknown').toLowerCase()
+    const { videoUrl, posterUrl } = extractVideoUrls(inner)
+
+    const upstreamError = data.response?.success === false ? data.response?.error || data.error : null
+    const failed = Boolean(upstreamError) || ['failed', 'error', 'cancelled', 'expired'].includes(status)
+    if (videoUrl || failed) {
+      log('GET', '/acedata/video/status', 200, Date.now() - start, `(${videoUrl ? 'done' : 'failed'})`)
+      return res.json({
+        done: true,
+        videoUrl,
+        posterUrl,
+        status,
+        error: failed ? `Render failed (${status}): ${upstreamError?.message || inner?.error?.message || data.message || 'see status'}` : null,
+      })
+    }
+
+    log('GET', '/acedata/video/status', 200, Date.now() - start, `(${status})`)
+    res.json({ done: false, status, videoUrl: null, posterUrl: null })
+  } catch (err) {
+    error('video/status', err)
+    res.json({ done: false, status: 'poll_error' })
   }
 })
 

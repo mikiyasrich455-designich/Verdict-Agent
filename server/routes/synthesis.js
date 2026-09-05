@@ -10,8 +10,12 @@ import {
   unwrapRyo,
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
+import { resolveCaInBody } from '../lib/caGuard.js'
 
 const router = Router()
+
+// Swap pasted contract addresses for live-resolved tickers before any handler runs
+router.use(resolveCaInBody)
 
 // ── RYO call helper ──────────────────────────────────────────────
 async function callRyoTool(toolName, body = {}) {

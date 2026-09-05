@@ -6,6 +6,7 @@ import dotenv from 'dotenv'
 import ryoRoutes from './routes/ryo.js'
 import aceRoutes from './routes/acedata.js'
 import synthesisRoutes from './routes/synthesis.js'
+import resolveRoutes from './routes/resolve.js'
 import { log } from './lib/logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -52,6 +53,7 @@ app.post('/test-post', (req, res) => {
 app.use('/api/proxy/ryo', ryoRoutes)
 app.use('/api/proxy/acedata', aceRoutes)
 app.use('/api/proxy/synthesis', synthesisRoutes)
+app.use('/api/proxy/resolve', resolveRoutes)
 
 // SPA fallback: any non-API GET serves the React app
 app.use((req, res, next) => {

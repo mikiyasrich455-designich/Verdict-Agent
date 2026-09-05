@@ -4,6 +4,23 @@
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// POST /api/proxy/resolve → live token lookup by contract address, ticker, or name
+// Returns { symbol, name, chain, chainLabel, ca, isCA, priceUsd, liquidityUsd, ... }
+export async function resolveToken(q) {
+  const res = await fetch('/api/proxy/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q }),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.error || `Couldn't find "${q}" — check the address or name and try again`)
+  }
+
+  return data
+}
+
 export const ANALYSIS_STEPS = [
   'Scanning market data…',
   'Running technicals…',
@@ -197,10 +214,12 @@ export async function generateStudioImage(symbol, verdict) {
   return { url: imageUrl, format: 'png' }
 }
 
-// POST /api/proxy/acedata/video → Seedance (1.0 Lite cheapest, fallback 2.0 Mini)
-export async function generateStudioVideo(symbol, verdict) {
+// Video → Seedance async task: POST /video submits, GET /video/status/:id polls.
+// Polling lives in the browser so no single request ever hits the platform timeout.
+export async function generateStudioVideo(symbol, verdict, onStatus) {
   const prompt = `A 12-second motion graphics video for ${symbol} crypto analysis. Scene 1 (0-4s): "${symbol}" logo reveal with ${verdict} badge animation. Scene 2 (4-8s): Price chart motion with confidence bar filling. Scene 3 (8-12s): Top bull and bear arguments as text cards sliding in. End frame: "VERDICT · Share this analysis". Style: dark glassmorphism, blue accent #5b93ff, professional.`
 
+  onStatus?.('Submitting render job…')
   const res = await fetch('/api/proxy/acedata/video', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -208,22 +227,49 @@ export async function generateStudioVideo(symbol, verdict) {
   })
 
   if (!res.ok) {
-    const err = await res.json()
+    const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'Video generation failed')
   }
 
-  const data = await res.json()
-  // Seedance response: {data:{video_url, poster_url, resolution, ratio, duration}}
-  const videoUrl = data?.data?.video_url || data?.video_url
-  const posterUrl = data?.data?.poster_url || data?.data?.last_frame_url || data?.poster_url
-  if (!videoUrl && !posterUrl) throw new Error('No video URL in response')
-  return {
-    poster: posterUrl || videoUrl,
-    videoUrl,
-    duration: 12,
-    resolution: '720p',
-    format: 'mp4',
+  const submitted = await res.json()
+
+  // If the upstream returned the finished video inline, use it directly.
+  if (!submitted.queued && (submitted.videoUrl || submitted.posterUrl)) {
+    return {
+      poster: submitted.posterUrl || submitted.videoUrl,
+      videoUrl: submitted.videoUrl,
+      duration: 12,
+      resolution: '720p',
+      format: 'mp4',
+    }
   }
+
+  if (!submitted.task_id) throw new Error('Video task was not queued — please try again')
+
+  // Poll the task status from the browser: every 4s, up to ~4 minutes.
+  onStatus?.('Render queued — generating frames…')
+  for (let i = 0; i < 60; i++) {
+    await wait(4000)
+
+    const statusRes = await fetch(`/api/proxy/acedata/video/status/${encodeURIComponent(submitted.task_id)}`)
+    const status = await statusRes.json().catch(() => ({}))
+
+    if (status.done && status.videoUrl) {
+      onStatus?.('Render complete')
+      return {
+        poster: status.posterUrl || status.videoUrl,
+        videoUrl: status.videoUrl,
+        duration: 12,
+        resolution: '720p',
+        format: 'mp4',
+      }
+    }
+    if (status.done && status.error) throw new Error(status.error)
+
+    if (i === 20) onStatus?.('Still rendering — this can take a minute or two…')
+  }
+
+  throw new Error('Video render timed out — please try again')
 }
 
 // Voice — browser TTS, no API call needed

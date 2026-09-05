@@ -23,6 +23,7 @@ function VideoStudioInner({ token, pick }) {
   const [phase, setPhase] = useState('idle') // idle | generating | done
   const [error, setError] = useState(null)
   const [output, setOutput] = useState(null)
+  const [stage, setStage] = useState('')
 
   if (!token) {
     return (
@@ -51,12 +52,14 @@ function VideoStudioInner({ token, pick }) {
     setPhase('generating')
     setError(null)
     setOutput(null)
+    setStage('Starting render…')
     try {
-      const res = await generateStudioVideo(script.symbol, script.verdict)
+      const res = await generateStudioVideo(script.symbol, script.verdict, (msg) => setStage(msg))
       const entry = {
         symbol: script.symbol,
         verdict: script.verdict,
         poster: res.poster,
+        videoUrl: res.videoUrl,
         duration: res.duration,
         resolution: res.resolution,
         format: res.format,
@@ -117,7 +120,8 @@ function VideoStudioInner({ token, pick }) {
               {phase === 'generating' && (
                 <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-[320px] flex flex-col items-center justify-center gap-4">
                   <OrbitLoader label="Generating video…" />
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">PLEASE WAIT · THIS MAY TAKE A MOMENT</p>
+                  <p className="font-mono text-[11px] text-accent/80">{stage || 'Please wait…'}</p>
+                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">AI VIDEO RENDER · UP TO 2-3 MINUTES</p>
                 </motion.div>
               )}
               {phase === 'done' && output && (
