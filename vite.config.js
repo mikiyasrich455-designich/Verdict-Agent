@@ -3,14 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  server: {
-    port: 3000,
-    host: true,
-    proxy: {
-      '/api/proxy': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-    },
-  },
+  base: '/', // Use root relative path for deployment
 })
