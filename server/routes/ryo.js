@@ -21,6 +21,7 @@ import { resolveCaInBody, resolveCaInList } from '../lib/caGuard.js'
 import { shortAddr } from '../lib/tokenResolver.js'
 import { callLLM, extractJsonLite, QWEN_MODELS } from '../lib/llm.js'
 import { unwrapRyo } from '../lib/normalizers.js'
+import { cmcQuote } from '../lib/marketData.js'
 
 const router = Router()
 
@@ -89,6 +90,46 @@ router.post('/market_overview', async (req, res) => {
   } catch (err) {
     error('market_overview', err)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/proxy/ryo/majors — real CMC quotes powering the console quick-start tiles.
+// 1h / 24h / 7d changes double as a genuine 3-point sparkline (no invented series).
+router.get('/majors', async (req, res) => {
+  const start = Date.now()
+  try {
+    const cacheKey = 'ryo:majors'
+    const cached = getCache(cacheKey)
+    if (cached) {
+      log('GET', '/ryo/majors', 200, Date.now() - start, '(cached)')
+      return res.json(cached)
+    }
+    const raw = await cmcQuote(['BTC', 'ETH', 'SOL', 'BNB', 'XRP'])
+    const src = raw?.data || {}
+    const majors = Object.values(src)
+      .map((c) => {
+        const q = c?.quote?.USD || {}
+        return {
+          symbol: c.symbol || '',
+          name: c.name || c.symbol || '',
+          rank: c.cmc_rank || null,
+          price: q.price || 0,
+          change1h: q.percent_change_1h || 0,
+          change24h: q.percent_change_24h || 0,
+          change7d: q.percent_change_7d || 0,
+          volume24h: q.volume_24h || 0,
+          marketCap: q.market_cap || 0,
+          logo: c.id ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png` : '',
+        }
+      })
+      .sort((a, b) => (a.rank || 9999) - (b.rank || 9999))
+    if (!majors.length) throw new Error('No major quotes available')
+    setCache(cacheKey, majors, 60 * 1000)
+    log('GET', '/ryo/majors', 200, Date.now() - start)
+    res.json(majors)
+  } catch (err) {
+    error('majors', err)
+    res.status(502).json({ error: err.message })
   }
 })
 

@@ -1,18 +1,20 @@
-// DashboardShell — the agent command center frame.
-// Windows Explorer-style collapsible skill groups in the sidebar,
-// a global token search topbar, and an <Outlet /> for each agent dashboard.
-import { useEffect, useMemo, useState } from 'react'
+// DashboardShell — the agent console frame (Console v2).
+// Flat cosmic sidebar with gradient active pill, centered global token search,
+// live intelligence rail on the right, and an <Outlet /> for each agent page.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp, Globe, Crosshair, Microscope, Scale, Gauge,
   Gavel, Swords, Megaphone, Radio, Clapperboard, ImageIcon, Film, AudioWaveform,
-  Cpu, ShieldAlert, History, LayoutDashboard, ChevronRight, Menu, X,
-  Search, Sparkles, CornerDownLeft, ArrowLeft,
+  Cpu, ShieldAlert, History, LayoutDashboard, Menu, X,
+  Search, Sparkles, CornerDownLeft, ArrowLeft, Bell, Plus, ChevronDown, Gem, Activity,
 } from 'lucide-react'
 import Logo from './Logo'
 import { resolveToken } from '../lib/api'
+import { fetchMajors } from '../lib/api'
 import { getActiveToken, setActiveToken, identityForSymbol, tokenHref, shortCa } from '../lib/activeToken'
+import { MicroLabel, LivePill, FeedRow, AgentRow, Spark, TONES } from './ConsoleUI'
 
 // Plain tickers that DexScreener may not know (e.g. BTC, ETH) still work
 // downstream via RYO — let those through unverified.
@@ -89,7 +91,7 @@ export const NAV_TREE = [
     icon: Clapperboard,
     skills: [
       { to: '/dashboard/studio/image', label: 'Image', icon: ImageIcon, hint: 'Verdict card art' },
-      { to: '/dashboard/studio/video', label: 'Video', icon: Film, hint: '5s verdict reel' },
+      { to: '/dashboard/studio/video', label: 'Video', icon: Film, hint: '15s verdict reel' },
       { to: '/dashboard/studio/voice', label: 'Voice', icon: AudioWaveform, hint: 'Narrated brief' },
     ],
   },
@@ -127,8 +129,33 @@ export function findSkill(pathname) {
   return null
 }
 
-// ── sidebar tree ────────────────────────────────────────────────
-function SideTree({ onNavigate }) {
+// Curated agent roster for the rail / activity cards.
+export const RAIL_AGENTS = [
+  { to: '/dashboard/overview', icon: Globe, name: 'Market Overview', desc: 'Regime, breadth & movers', tone: 'blue' },
+  { to: '/dashboard/analysis', icon: Crosshair, name: 'Token Analysis', desc: 'On-chain & fundamental profile', tone: 'violet' },
+  { to: '/dashboard/sentiment', icon: Gauge, name: 'Sentiment Shift', desc: 'Social & sentiment tracking', tone: 'cyan' },
+  { to: '/dashboard/narrative', icon: Radio, name: 'KOL Radar', desc: 'Influencer & narrative monitoring', tone: 'violet' },
+  { to: '/dashboard/council', icon: Swords, name: 'Bull vs Bear', desc: 'Adversarial council debate', tone: 'blue' },
+]
+
+// ── sidebar ─────────────────────────────────────────────────────
+function SideBrand() {
+  return (
+    <div className="flex items-center gap-3 px-4 pt-5 pb-4">
+      <span className="cv-logobox">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9L4.9 19.1" stroke="white" strokeWidth="2.4" strokeLinecap="round" />
+        </svg>
+      </span>
+      <div className="leading-none">
+        <span className="block text-[16px] font-bold tracking-tight text-[#F2F6FF]">verdict</span>
+        <MicroLabel className="mt-1 block">AGENT CONSOLE</MicroLabel>
+      </div>
+    </div>
+  )
+}
+
+function SideNav({ onNavigate }) {
   const { pathname } = useLocation()
   const [searchParams] = useSearchParams()
   const focus = searchParams.get('token')
@@ -141,23 +168,14 @@ function SideTree({ onNavigate }) {
       ? { symbol: focus }
       : stored
   const activeSkill = findSkill(pathname)
-  const [open, setOpen] = useState(() => {
-    const map = {}
-    for (const g of NAV_TREE) map[g.id] = true
-    return map
-  })
-
-  const toggle = (id) => setOpen((m) => ({ ...m, [id]: !m[id] }))
 
   return (
-    <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
+    <nav className="flex-1 overflow-y-auto px-3 pb-3">
       <NavLink
         to="/dashboard"
         end
         onClick={onNavigate}
-        className={({ isActive }) =>
-          `ftree-item !pl-3 ${isActive && !activeSkill ? 'on' : ''}`
-        }
+        className={({ isActive }) => `cv-nav-item ${isActive && !activeSkill ? 'on' : ''}`}
       >
         <LayoutDashboard size={15} strokeWidth={2} />
         Your Token
@@ -165,54 +183,33 @@ function SideTree({ onNavigate }) {
 
       {NAV_TREE.map((group) => {
         const GIcon = group.icon
-        const isOpen = open[group.id]
         return (
-          <div className="ftree-group" key={group.id}>
-            <button
-              type="button"
-              className={`ftree-head ${isOpen ? 'open' : ''}`}
-              onClick={() => toggle(group.id)}
-              aria-expanded={isOpen}
-            >
-              <ChevronRight size={11} className="chev" strokeWidth={2.4} />
-              <GIcon size={13} strokeWidth={2} />
-              {group.label}
-              <span className="ftree-count">{group.skills.length}</span>
-            </button>
-            <AnimatePresence initial={false}>
-              {isOpen && (
-                <motion.div
-                  key="items"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.22, ease: 'easeInOut' }}
-                  className="overflow-hidden"
-                >
-                  <div className="py-0.5 space-y-0.5">
-                    {group.skills.map((skill) => {
-                      const SIcon = skill.icon
-                      const to =
-                        active?.symbol && TOKEN_SCOPED.includes(skill.to)
-                          ? tokenHref(skill.to, active)
-                          : skill.to
-                      return (
-                        <NavLink
-                          key={skill.to}
-                          to={to}
-                          onClick={onNavigate}
-                          title={skill.hint}
-                          className={({ isActive }) => `ftree-item ${isActive ? 'on' : ''}`}
-                        >
-                          <SIcon size={14} strokeWidth={2} />
-                          {skill.label}
-                        </NavLink>
-                      )
-                    })}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <div key={group.id}>
+            <div className="cv-nav-label">
+              <GIcon size={11} strokeWidth={2.2} className="text-[#5b6890]" />
+              <MicroLabel>{group.label}</MicroLabel>
+            </div>
+            <div className="space-y-0.5">
+              {group.skills.map((skill) => {
+                const SIcon = skill.icon
+                const to =
+                  active?.symbol && TOKEN_SCOPED.includes(skill.to)
+                    ? tokenHref(skill.to, active)
+                    : skill.to
+                return (
+                  <NavLink
+                    key={skill.to}
+                    to={to}
+                    onClick={onNavigate}
+                    title={skill.hint}
+                    className={({ isActive }) => `cv-nav-item ${isActive ? 'on' : ''}`}
+                  >
+                    <SIcon size={15} strokeWidth={2} />
+                    {skill.label}
+                  </NavLink>
+                )
+              })}
+            </div>
           </div>
         )
       })}
@@ -222,10 +219,15 @@ function SideTree({ onNavigate }) {
 
 function SideFooter() {
   return (
-    <div className="px-4 py-3 border-t border-white/5">
-      <p className="text-[10px] text-faint leading-relaxed">
-        Live market data · AI reasoning · Not financial advice.
-      </p>
+    <div className="mt-auto">
+      <div className="cv-syscard">
+        <i />
+        <div>
+          <b>System Online</b>
+          <span>All agents operational</span>
+        </div>
+      </div>
+      <p className="px-5 pb-4 text-[10px] text-[#5b6890]">Verdict v2.0</p>
     </div>
   )
 }
@@ -241,7 +243,9 @@ function Topbar({ onMenu }) {
     [focusToken, searchParams]
   )
   const [query, setQuery] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
   const found = useMemo(() => findSkill(pathname), [pathname])
+  const isHome = pathname === '/dashboard'
 
   const [resolving, setResolving] = useState(false)
   const [resolveErr, setResolveErr] = useState('')
@@ -312,7 +316,7 @@ function Topbar({ onMenu }) {
             prev.set('token', identity.symbol)
             if (identity.ca) {
               prev.set('ca', identity.ca)
-              if (identity.chain) prev.set('chain', identity.chain)
+              prev.set('chain', identity.chain)
             } else {
               prev.delete('ca')
               prev.delete('chain')
@@ -330,60 +334,40 @@ function Topbar({ onMenu }) {
   }
 
   return (
-    <header className="h-16 flex-shrink-0 flex items-center gap-3 px-4 md:px-6 border-b border-white/5 bg-[rgba(5,7,15,0.72)] backdrop-blur-xl">
-      <Link
-        to="/"
-        className="nav-link p-2 rounded-full flex-shrink-0"
-        aria-label="Back to home"
-        title="Back to home"
-      >
-        <ArrowLeft size={18} />
+    <header className="cv-topbar">
+      <Link to={isHome ? '/' : '/dashboard'} className="cv-iconbtn" aria-label={isHome ? 'Back to home' : 'Back to console'} title={isHome ? 'Back to home' : 'Back to console'}>
+        <ArrowLeft size={16} />
       </Link>
+      <span className="hidden md:block w-[118px] truncate text-[13px] font-semibold text-[#E8EFFF]">
+        {isHome ? 'Home' : found ? found.skill.label : 'Console'}
+      </span>
 
-      <button
-        type="button"
-        className="lg:hidden nav-link p-2 rounded-full"
-        onClick={onMenu}
-        aria-label="Open skill tree"
-      >
-        <Menu size={18} />
+      <button type="button" className="cv-iconbtn lg:hidden" onClick={onMenu} aria-label="Open skill tree">
+        <Menu size={16} />
       </button>
 
-      {/* breadcrumb */}
-      <div className="hidden md:flex items-center gap-2 min-w-0">
-        {found ? (
-          <>
-            <span className="font-mono text-[10px] tracking-[0.18em] text-faint">{found.group.label}</span>
-            <ChevronRight size={11} className="text-faint" />
-            <span className="text-[13px] font-medium text-snow truncate">{found.skill.label}</span>
-          </>
-        ) : (
-          <span className="text-[13px] font-medium text-snow">Your Token</span>
-        )}
-      </div>
-
       {/* global token search */}
-      <form onSubmit={submit} className="flex-1 max-w-[420px] ml-auto md:ml-0 relative">
-        <div className={`glass-input flex items-center gap-2 !py-2 ${resolveErr ? '!border-red-400/50' : ''}`}>
-          <Search size={14} className="text-faint flex-shrink-0" />
+      <form onSubmit={submit} className="relative mx-auto w-full max-w-[560px] flex-1">
+        <div className="cv-top-search">
+          <Search size={14} className="flex-shrink-0 text-[#66739A]" />
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setResolveErr('') }}
-            placeholder="Drop a token, name, or CA…"
-            className="flex-1 bg-transparent outline-none text-[13px] text-snow placeholder:text-faint min-w-0"
+            placeholder="Search token, contract address, ticker..."
+            aria-label="Search token"
           />
           {resolving ? (
-            <span className="w-3.5 h-3.5 rounded-full border-2 border-accent/30 border-t-accent animate-spin flex-shrink-0" />
+            <span className="kbd">
+              <span className="block h-3 w-3 animate-spin rounded-full border-2 border-[#6EA8FF]/30 border-t-[#6EA8FF]" />
+            </span>
           ) : (
-            query && (
-              <button type="submit" className="text-faint hover:text-accent transition-colors" aria-label="Focus token">
-                <CornerDownLeft size={13} />
-              </button>
-            )
+            <button type="submit" className="kbd" aria-label="Focus token" title="Focus this token">
+              <CornerDownLeft size={12} />
+            </button>
           )}
         </div>
         {resolveErr && (
-          <div className="absolute top-full left-0 mt-1.5 z-50 max-w-full text-[11px] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-1.5 shadow-lg">
+          <div className="absolute left-0 top-full z-50 mt-1.5 max-w-full rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-300 shadow-lg">
             {resolveErr}
           </div>
         )}
@@ -392,28 +376,198 @@ function Topbar({ onMenu }) {
       {focusToken && (
         <span
           title={activeToken?.ca ? `Pinned to ${activeToken.ca}` : activeToken?.name || focusToken}
-          className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] text-accent bg-accent/10 border border-accent/25 rounded-full px-3 py-1 max-w-[220px]"
+          className="hidden xl:inline-flex max-w-[190px] items-center gap-1.5 rounded-full border border-[#7E9CFF]/25 bg-[#6EA8FF]/10 px-3 py-1.5 font-mono text-[11px] text-[#9DC0FF]"
         >
           {activeToken?.logo ? (
-            <img src={activeToken.logo} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
+            <img src={activeToken.logo} alt="" className="h-4 w-4 flex-shrink-0 rounded-full object-cover" />
           ) : (
             <Crosshair size={11} className="flex-shrink-0" />
           )}
           <span className="truncate">{focusToken}</span>
-          {activeToken?.ca && (
-            <span className="text-faint">· {shortCa(activeToken.ca)}</span>
-          )}
+          {activeToken?.ca && <span className="text-[#66739A]">· {shortCa(activeToken.ca)}</span>}
         </span>
       )}
 
-      <Link
-        to="/verdict"
-        className="hidden sm:inline-flex items-center gap-1.5 text-[12px] font-semibold text-white bg-gradient-to-r from-accent to-[#2b68ff] rounded-full px-4 py-2 shadow-[0_0_18px_rgba(43,104,255,0.35)] hover:shadow-[0_0_26px_rgba(43,104,255,0.55)] transition-shadow"
-      >
-        <Sparkles size={13} />
+      <button type="button" className="cv-iconbtn" title="Live intelligence feed" aria-label="Live intelligence feed">
+        <Bell size={16} />
+        <span className="cv-bell-dot" />
+      </button>
+
+      <Link to="/verdict" className="cv-btn !rounded-full !px-4 !py-2">
+        <Plus size={14} strokeWidth={2.6} />
         New Verdict
       </Link>
+
+      <div className="relative flex items-center">
+        <button type="button" className="cv-avatar" onClick={() => setMenuOpen((o) => !o)} aria-label="Account menu">
+          M
+        </button>
+        <ChevronDown size={13} className="ml-1 hidden text-[#66739A] sm:block" />
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-50" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+            <div className="cv-menu">
+              <Link className="cv-menu-item" to="/dashboard/history" onClick={() => setMenuOpen(false)}>
+                <History size={13} /> Decision history
+              </Link>
+              <Link className="cv-menu-item" to="/dashboard" onClick={() => setMenuOpen(false)}>
+                <LayoutDashboard size={13} /> Console home
+              </Link>
+              <Link className="cv-menu-item" to="/" onClick={() => setMenuOpen(false)}>
+                <Globe size={13} /> Landing page
+              </Link>
+            </div>
+          </>
+        )}
+      </div>
     </header>
+  )
+}
+
+// ── right rail: live intelligence + agent roster ────────────────
+function eventLine(m) {
+  const picks = [
+    { k: '1h', v: Number(m.change1h) || 0 },
+    { k: '24h', v: Number(m.change24h) || 0 },
+    { k: '7d', v: Number(m.change7d) || 0 },
+  ].sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+  const top = picks[0]
+  const noun = top.k === '1h' ? 'Sharp 1h move' : top.k === '7d' ? '7d trend shift' : '24h momentum'
+  return `${noun} ${top.v >= 0 ? '+' : ''}${top.v.toFixed(2)}%`
+}
+
+function agoText(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  return `${Math.floor(m / 60)}h ago`
+}
+
+function IntelRail() {
+  const { pathname } = useLocation()
+  const [majors, setMajors] = useState(null)
+  const [loadedAt, setLoadedAt] = useState(null)
+  const [err, setErr] = useState('')
+  const [tab, setTab] = useState('latest')
+  const [now, setNow] = useState(Date.now())
+
+  const load = useCallback(async () => {
+    try {
+      const m = await fetchMajors()
+      setMajors(Array.isArray(m) ? m : null)
+      setLoadedAt(Date.now())
+      setErr('')
+    } catch (e) {
+      setErr(e?.message || 'feed offline')
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+    const t = setInterval(load, 60000)
+    return () => clearInterval(t)
+  }, [load])
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000)
+    return () => clearInterval(t)
+  }, [])
+
+  const ago = loadedAt ? agoText(now - loadedAt) : ''
+
+  return (
+    <aside className="cv-rail hidden xl:flex">
+      <section className="cv-panel">
+        <div className="cv-head">
+          <h3 className="cv-title">
+            <span className="cv-title-icon"><Activity size={13} strokeWidth={2.2} /></span>
+            INTELLIGENCE
+          </h3>
+          <div className="cv-head-right"><LivePill /></div>
+        </div>
+        <div className="cv-body !pt-1">
+          <div className="cv-tabs mb-1">
+            <button type="button" className={`cv-tab ${tab === 'latest' ? 'on' : ''}`} onClick={() => setTab('latest')}>Latest</button>
+            <button type="button" className={`cv-tab ${tab === 'agents' ? 'on' : ''}`} onClick={() => setTab('agents')}>Agents</button>
+          </div>
+          {tab === 'latest' ? (
+            !majors ? (
+              err ? (
+                <p className="py-4 text-center text-[11px] text-[#7C89B0]">Intelligence feed offline — {err}</p>
+              ) : (
+                <div className="space-y-2 py-2">
+                  {Array.from({ length: 5 }).map((_, i) => <div key={i} className="cv-ghost h-[52px]" />)}
+                </div>
+              )
+            ) : (
+              majors.map((m) => (
+                <FeedRow
+                  key={m.symbol}
+                  img={m.logo}
+                  symbol={m.symbol}
+                  text={eventLine(m)}
+                  meta={`updated ${ago} · rank #${m.rank ?? '—'}`}
+                  spark={[m.change1h, m.change24h, m.change7d]}
+                  tone={(Number(m.change24h) || 0) >= 0 ? 'up' : 'down'}
+                />
+              ))
+            )
+          ) : (
+            <div className="pt-1">
+              {NAV_TREE.flatMap((g) => g.skills).map((s) => {
+                const SIcon = s.icon
+                const on = pathname === s.to || pathname.startsWith(`${s.to}/`)
+                return (
+                  <AgentRow
+                    key={s.to}
+                    icon={SIcon}
+                    name={s.label}
+                    desc={s.hint}
+                    state={on ? 'active' : 'ready'}
+                    to={s.to}
+                    tone={on ? 'up' : 'blue'}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="cv-panel">
+        <div className="cv-head">
+          <h3 className="cv-title">
+            <span className="cv-title-icon"><Sparkles size={13} strokeWidth={2.2} /></span>
+            AGENTS
+          </h3>
+          <div className="cv-head-right">
+            <Link to="/dashboard" className="cv-viewall">View all →</Link>
+          </div>
+        </div>
+        <div className="cv-body !pt-1">
+          {RAIL_AGENTS.map((a) => (
+            <AgentRow
+              key={a.to}
+              icon={a.icon}
+              name={a.name}
+              desc={a.desc}
+              tone={a.tone}
+              state={pathname === a.to || pathname.startsWith(`${a.to}/`) ? 'active' : 'ready'}
+              to={a.to}
+            />
+          ))}
+        </div>
+      </section>
+
+      <div className="cv-railfoot">
+        <span className="cv-railfoot-gem"><Gem size={17} /></span>
+        <div>
+          <p className="text-[12px] font-semibold text-[#E6EDFF]">Real-time intelligence.</p>
+          <p className="mt-0.5 text-[10.5px] text-[#7C89B0]">Powered by AI agents.</p>
+        </div>
+      </div>
+    </aside>
   )
 }
 
@@ -423,19 +577,11 @@ export default function DashboardShell() {
   const { pathname } = useLocation()
 
   return (
-    <div className="fixed inset-0 z-20 flex bg-night/80">
+    <div className="cv-root fixed inset-0 z-20 flex bg-[#05070F]">
       {/* desktop sidebar */}
-      <aside className="hidden lg:flex w-[264px] flex-shrink-0 flex-col border-r border-white/5 bg-[rgba(7,9,20,0.72)] backdrop-blur-xl">
-        <div className="h-16 flex items-center gap-2.5 px-5 border-b border-white/5">
-          <Logo size={26} />
-          <div className="leading-none">
-            <span className="text-[15px] font-semibold tracking-tight text-[#EAF2FF]">
-              verdict<span className="text-[#4E8BFF] align-super text-[10px]">*</span>
-            </span>
-            <p className="font-mono text-[8.5px] tracking-[0.22em] text-faint mt-1">AGENT CONSOLE</p>
-          </div>
-        </div>
-        <SideTree />
+      <aside className="cv-side hidden w-[248px] flex-shrink-0 flex-col lg:flex">
+        <SideBrand />
+        <SideNav />
         <SideFooter />
       </aside>
 
@@ -451,43 +597,42 @@ export default function DashboardShell() {
           >
             <div className="dash-mobile-back" onClick={() => setDrawer(false)} />
             <motion.aside
-              className="dash-mobile-panel flex flex-col"
+              className="dash-mobile-panel cv-side flex flex-col"
               initial={{ x: -48 }}
               animate={{ x: 0 }}
               exit={{ x: -48 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
             >
-              <div className="flex items-center justify-between px-2 pb-3 mb-1 border-b border-white/5">
-                <div className="flex items-center gap-2.5">
-                  <Logo size={24} />
-                  <span className="text-[14px] font-semibold text-[#EAF2FF]">
-                    verdict<span className="text-[#4E8BFF] align-super text-[10px]">*</span>
-                  </span>
-                </div>
-                <button type="button" className="nav-link p-2 rounded-full" onClick={() => setDrawer(false)} aria-label="Close menu">
-                  <X size={17} />
+              <div className="flex items-center justify-between px-3 pb-2">
+                <SideBrand />
+                <button type="button" className="cv-iconbtn" onClick={() => setDrawer(false)} aria-label="Close menu">
+                  <X size={16} />
                 </button>
               </div>
-              <SideTree onNavigate={() => setDrawer(false)} />
+              <SideNav onNavigate={() => setDrawer(false)} />
+              <SideFooter />
             </motion.aside>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* main column */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setDrawer(true)} />
-        <main className="flex-1 overflow-y-auto">
-          <motion.div
-            key={pathname}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, ease: 'easeOut' }}
-            className="max-w-[1280px] mx-auto px-4 md:px-6 py-5 md:py-7"
-          >
-            <Outlet />
-          </motion.div>
-        </main>
+        <div className="flex min-h-0 flex-1">
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              className="px-4 py-5 md:px-6"
+            >
+              <Outlet />
+            </motion.div>
+          </main>
+          <IntelRail />
+        </div>
       </div>
     </div>
   )

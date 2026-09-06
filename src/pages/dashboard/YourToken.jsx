@@ -1,40 +1,59 @@
-// Your Token — drop ONE token and every agent skill in the dashboard works for it.
+// Your Token — console home. Drop ONE token and every agent skill works for it.
 // The token is stored (localStorage) and carried through every sidebar skill link.
-import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, ArrowRight, Crosshair } from 'lucide-react'
-import TokenSearch from '../../components/TokenSearch'
-import { PageHeader } from '../../components/DashUI'
+import { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import {
+  Boxes, ArrowRight, Crosshair, Zap, Activity, BarChart3, Radio,
+  ShieldAlert, MessageSquare, Microscope, Loader2, RefreshCw, Sparkles,
+} from 'lucide-react'
+import { PanelV2, Spark, TokenLogo, LivePill, TONES } from '../../components/ConsoleUI'
+import { fmtPrice } from '../../components/DashUI'
 import { resolveTokenInput } from '../../components/DashboardShell'
 import { setActiveToken, getActiveToken, identityFromParams, tokenHref } from '../../lib/activeToken'
+import { fetchMajors } from '../../lib/api'
 
-const WORDS = ['Bitcoin', 'Ethereum', 'Solana', 'every token', 'every chain', 'every narrative']
+const HERO_IMG =
+  'https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=Dark%20cosmic%20space%20scene%2C%20deep%20navy%20blue%20background%2C%20giant%20glowing%20blue%20planet%20horizon%20on%20the%20left%20side%2C%20translucent%20glass%20orb%20sphere%20with%20a%20glowing%20crystal%20four-point%20star%20inside%20floating%20on%20the%20right%2C%20thin%20orbital%20rings%20and%20small%20satellites%2C%20subtle%20purple%20nebula%20glow%2C%20scattered%20stars%2C%20premium%203D%20render%2C%20futuristic%20crypto%20intelligence%20dashboard%20hero%20background%2C%20no%20text&image_size=landscape_16_9'
 
-const SKILLS = [
-  { to: '/dashboard/analysis', label: 'Token Analysis' },
-  { to: '/dashboard/deep', label: 'Deep Analysis' },
-  { to: '/dashboard/council', label: 'Council Debate' },
-  { to: '/dashboard/narrative', label: 'KOL Radar' },
-  { to: '/dashboard/risk', label: 'Risk Desk' },
-  { to: '/dashboard/studio/image', label: 'Studio · Image' },
-  { to: '/dashboard/studio/video', label: 'Studio · Video' },
-  { to: '/dashboard/studio/voice', label: 'Studio · Voice' },
+const CHIPS = [
+  { icon: BarChart3, label: 'Market', to: '/dashboard/overview' },
+  { icon: Boxes, label: 'On-chain', to: '/dashboard/analysis' },
+  { icon: Radio, label: 'Narrative', to: '/dashboard/narrative' },
+  { icon: ShieldAlert, label: 'Risk', to: '/dashboard/risk' },
+  { icon: MessageSquare, label: 'Sentiment', to: '/dashboard/sentiment' },
+  { icon: Microscope, label: 'Deep Research', to: '/dashboard/deep' },
+]
+
+const ACTIVITY = [
+  { icon: BarChart3, name: 'Market Overview', desc: 'Market structure & breadth', to: '/dashboard/overview', tone: TONES.blue },
+  { icon: Microscope, name: 'Deep Analysis', desc: 'On-chain & fundamental depth', to: '/dashboard/deep', tone: TONES.violet },
+  { icon: Activity, name: 'Sentiment Shift', desc: 'Social & sentiment tracking', to: '/dashboard/sentiment', tone: TONES.cyan },
+  { icon: Radio, name: 'KOL Radar', desc: 'Influencer & narrative monitoring', to: '/dashboard/narrative', tone: TONES.violet },
 ]
 
 export default function YourToken() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') || ''
-  const [wordIdx, setWordIdx] = useState(0)
 
-  useEffect(() => {
-    const interval = setInterval(() => setWordIdx((i) => (i + 1) % WORDS.length), 2400)
-    return () => clearInterval(interval)
-  }, [])
-
+  const [q, setQ] = useState('')
   const [resolving, setResolving] = useState(false)
   const [resolveErr, setResolveErr] = useState('')
+
+  const [majors, setMajors] = useState(null)
+  const [majorsErr, setMajorsErr] = useState('')
+  const loadMajors = useCallback(async () => {
+    setMajorsErr('')
+    try {
+      setMajors(await fetchMajors())
+    } catch (e) {
+      setMajors(null)
+      setMajorsErr(e.message || 'Live quotes unavailable')
+    }
+  }, [])
+  useEffect(() => { loadMajors() }, [loadMajors])
 
   const go = async (raw) => {
     const input = String(raw || '').trim()
@@ -55,123 +74,156 @@ export default function YourToken() {
   const tokenPath = (to) =>
     tokenHref(to, identityFromParams(searchParams) || getActiveToken() || (token ? { symbol: token } : null))
 
+  const pick = (m) => {
+    const identity = { symbol: m.symbol, name: m.name, logo: m.logo }
+    setActiveToken(identity)
+    navigate(tokenHref('/dashboard/analysis', identity))
+  }
+
+  const list = Array.isArray(majors) ? majors.slice(0, 5) : []
+
   return (
-    <>
-      <PageHeader
-        icon={Sparkles}
-        title="Your Token"
-        subtitle="Drop it once — every agent and skill works for that token."
-      />
-
-      {/* hero: one input, whole dashboard */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
+    <div className="flex flex-col gap-4">
+      {/* ── hero: one input, whole console ── */}
+      <motion.section
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.55 }}
-        className="glass-panel mt-2 py-10 md:py-12 px-6 text-center"
-        style={{ background: 'linear-gradient(135deg, rgba(91,147,255,0.08), rgba(2,2,8,0.5))' }}
+        transition={{ duration: 0.5, ease: 'easeOut' }}
+        className="cv-hero px-6 py-8 md:px-9 md:py-10"
+        style={{ '--cv-hero-img': `url("${HERO_IMG}")` }}
       >
-        <p className="text-[11px] font-mono uppercase tracking-[0.22em] text-accent mb-4">
-          One token in · every agent on it
-        </p>
-        <h2 className="text-3xl md:text-[40px] font-bold text-snow tracking-tight leading-tight">
-          Bring every crypto on earth{' '}
-          <span className="block md:inline">
-            to{' '}
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={wordIdx}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.35 }}
-                className="text-gradient inline-block"
-              >
-                {WORDS[wordIdx]}
-              </motion.span>
-            </AnimatePresence>
-          </span>
-        </h2>
-        <p className="text-muted text-sm mt-3 mb-8">
-          Drop your token. Research, Council, Narrative, Studio — everything runs on it.
+        <span className="cv-hero-badge"><Boxes size={12} /> AI CRYPTO INTELLIGENCE</span>
+        <h1 className="cv-hero-title mt-4">Your Token</h1>
+        <p className="cv-hero-sub">Real intelligence. <em>Deeper insights.</em></p>
+        <p className="cv-hero-desc">
+          Enter a token, contract address or ticker to get a comprehensive analysis
+          from our multi-agent AI system.
         </p>
 
-        <TokenSearch placeholder="Drop your token — ticker, name, or contract address…" onSubmit={go} />
-        {resolving && (
-          <p className="mt-4 text-[12px] font-mono text-accent animate-pulse">
-            Finding your token live…
-          </p>
-        )}
-        {resolveErr && (
-          <p className="mt-4 inline-block text-[12px] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-1.5">
-            {resolveErr}
-          </p>
-        )}
-      </motion.div>
-
-      {/* active token strip */}
-      {token && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-panel mt-4 px-5 py-4 flex flex-wrap items-center gap-3"
-        >
-          <span className="inline-flex items-center gap-2 font-mono text-[13px] text-accent">
-            <Crosshair size={14} /> {token}
+        <form className="cv-hero-search" onSubmit={(e) => { e.preventDefault(); go(q) }}>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-[rgba(126,156,255,0.3)] bg-[rgba(78,139,255,0.14)] text-[#9db9ff]">
+            <Crosshair size={15} />
           </span>
-          <span className="text-[12.5px] text-muted">
-            is locked in — every skill below already works for it. No re-entry needed.
-          </span>
-          <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="glass-chip ml-auto">
-            Change token
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search a token, contract address, or ticker..."
+          />
+          <button type="submit" className="cv-btn" disabled={resolving}>
+            {resolving ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            Run Verdict <ArrowRight size={13} />
           </button>
-        </motion.div>
-      )}
+        </form>
+        {resolveErr && <p className="mt-3 text-[12px] text-[#ff8fa3]">{resolveErr}</p>}
 
-      {/* how it flows */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15, duration: 0.55 }}
-        className="glass-panel mt-4 py-6 px-6"
-      >
-        <div className="grid md:grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-accent text-2xl font-bold mb-1">1</div>
-            <p className="text-[13px] text-snow/90 font-medium">Token locked</p>
-            <p className="text-[11px] text-faint mt-1">It becomes the context for every agent</p>
-          </div>
-          <div>
-            <div className="text-accent text-2xl font-bold mb-1">2</div>
-            <p className="text-[13px] text-snow/90 font-medium">Agents activate</p>
-            <p className="text-[11px] text-faint mt-1">Market, Council, Narrative, Studio — all on your token</p>
-          </div>
-          <div>
-            <div className="text-accent text-2xl font-bold mb-1">3</div>
-            <p className="text-[13px] text-snow/90 font-medium">Share the result</p>
-            <p className="text-[11px] text-faint mt-1">Export image, video or voice built from the full analysis</p>
-          </div>
-        </div>
-      </motion.div>
-
-      {/* all skills for this token */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25, duration: 0.55 }}
-        className="glass-panel mt-4 py-5 px-6"
-      >
-        <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-muted mb-3">
-          {token ? `Every skill, ready for ${token}` : 'Pick a skill'}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {SKILLS.map((s) => (
-            <Link key={s.to} to={tokenPath(s.to)} className="glass-chip">
-              {s.label} <ArrowRight size={11} />
+        <div className="mt-4 flex flex-wrap gap-2">
+          {CHIPS.map((c) => (
+            <Link key={c.to} to={tokenPath(c.to)} className="cv-chip">
+              <c.icon size={12} /> {c.label}
             </Link>
           ))}
         </div>
-      </motion.div>
-    </>
+      </motion.section>
+
+      {/* ── quick start: real live majors ── */}
+      <PanelV2
+        icon={Zap}
+        delay={0.08}
+        title={(
+          <span className="flex flex-col gap-0.5">
+            Quick Start
+            <span className="text-[10.5px] font-normal tracking-[0.02em] text-[#7c89b0]">
+              Popular tokens and recent investigations
+            </span>
+          </span>
+        )}
+        right={<Link to={tokenPath('/dashboard/overview')} className="cv-viewall">View all <ArrowRight size={12} /></Link>}
+      >
+        {majorsErr ? (
+          <div className="flex flex-col items-start gap-2 py-1">
+            <p className="text-[12px] text-[#8b98bd]">Live market quotes are unreachable right now. {majorsErr}</p>
+            <button type="button" className="cv-chip" onClick={loadMajors}>
+              <RefreshCw size={12} /> Retry
+            </button>
+          </div>
+        ) : !majors ? (
+          <div className="cv-quick-grid">
+            {[0, 1, 2, 3, 4].map((i) => <div key={i} className="cv-ghost h-[96px]" />)}
+          </div>
+        ) : (
+          <div className="cv-quick-grid">
+            {list.map((m) => {
+              const up = (m.change24h || 0) >= 0
+              return (
+                <button key={m.symbol} type="button" className="cv-token-card text-left" onClick={() => pick(m)}>
+                  <div className="cv-token-card-top">
+                    <TokenLogo src={m.logo} symbol={m.symbol} size={34} />
+                    <div className="min-w-0">
+                      <div className="cv-token-card-sym">{m.symbol}</div>
+                      <div className="cv-token-card-name truncate">{m.name}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="cv-token-card-price">{fmtPrice(m.price)}</div>
+                      <div className="text-[11px] font-semibold" style={{ color: up ? TONES.up : TONES.down }}>
+                        {up ? '+' : ''}{(m.change24h || 0).toFixed(2)}%
+                      </div>
+                    </div>
+                    <Spark points={[m.change1h, m.change24h, m.change7d]} tone={up ? 'up' : 'down'} w={62} h={26} />
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </PanelV2>
+
+      {/* ── agent activity: honest live/ready states ── */}
+      <PanelV2
+        icon={Activity}
+        delay={0.16}
+        title={(
+          <span className="flex flex-col gap-0.5">
+            Agent Activity
+            <span className="text-[10.5px] font-normal tracking-[0.02em] text-[#7c89b0]">
+              Your agents are analyzing the market. Real-time insights across all layers.
+            </span>
+          </span>
+        )}
+        right={<LivePill label="All systems online" />}
+      >
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {ACTIVITY.map((a) => {
+            const live = location.pathname === a.to
+            return (
+              <Link key={a.to} to={tokenPath(a.to)} className="cv-act">
+                <div className="cv-act-top">
+                  <span
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full"
+                    style={{ background: `${a.tone}1f`, color: a.tone, border: `1px solid ${a.tone}45` }}
+                  >
+                    <a.icon size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12.5px] font-semibold text-[#eef3ff]">{a.name}</div>
+                    <div className="truncate text-[10.5px] text-[#7c89b0]">{a.desc}</div>
+                  </div>
+                  <ArrowRight size={13} className="shrink-0 text-[#5d6a92]" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="cv-act-bar flex-1">
+                    {live && <span className="cv-act-fill live" />}
+                  </span>
+                  <span className="cv-label" style={live ? { color: TONES.up } : undefined}>
+                    {live ? 'LIVE' : 'READY'}
+                  </span>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      </PanelV2>
+    </div>
   )
 }

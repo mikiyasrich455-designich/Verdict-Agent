@@ -7,37 +7,18 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  Activity, AlertTriangle, ArrowUpRight, Check, Copy, ExternalLink, FileText,
-  Github, Globe, Layers, MessageCircle, Microscope, ShieldAlert, Sparkles,
-  Swords, Twitter, Wallet, Search,
+  Activity, AlertTriangle, ArrowUpRight, Check, Copy,
+  Layers, Microscope, ShieldAlert, Sparkles,
+  Swords, Wallet, Search, Coins, Timer, Gauge,
 } from 'lucide-react'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchTokenProfile } from '../../lib/api'
 import { setActiveToken, tokenHref } from '../../lib/activeToken'
-import { Panel, Stat, Chip, ErrorState, fmtUsd, fmtPrice, fmtPct, fmtNum, changeColor } from '../../components/DashUI'
-
-function SentimentSplit({ sentiment }) {
-  const bull = Math.max(0, Math.min(100, Number(sentiment?.bull) || 0))
-  const bear = Math.max(0, Math.min(100, Number(sentiment?.bear) || 0))
-  const neutral = Math.max(0, 100 - bull - bear)
-  return (
-    <div>
-      <div className="h-3 rounded-full overflow-hidden flex bg-white/5 mb-3">
-        <div className="bg-gradient-to-r from-[#34d399] to-[#10b981]" style={{ width: `${bull}%` }} />
-        <div className="bg-white/15" style={{ width: `${neutral}%` }} />
-        <div className="bg-gradient-to-r from-[#ef4444] to-[#f87171]" style={{ width: `${bear}%` }} />
-      </div>
-      <div className="grid grid-cols-3 text-center">
-        {[['Bull', bull, 'text-success'], ['Neutral', neutral, 'text-snow/70'], ['Bear', bear, 'text-danger']].map(([k, v, cls]) => (
-          <div key={k}>
-            <p className={`font-display text-lg font-bold ${cls}`}>{v}%</p>
-            <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-faint">{k}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
+import {
+  PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
+  TokenLogo, MicroLabel, TONES,
+} from '../../components/ConsoleUI'
+import { ErrorState, fmtUsd, fmtPrice, fmtPct, fmtNum } from '../../components/DashUI'
 
 function CopyChip({ value }) {
   const [done, setDone] = useState(false)
@@ -56,36 +37,32 @@ function CopyChip({ value }) {
           /* clipboard blocked — the full address is still in the tooltip */
         }
       }}
-      className="inline-flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1 rounded-full border border-line2 bg-white/[0.04] text-muted hover:text-snow hover:border-accent/50 transition-colors"
+      className="cv-chip !rounded-full font-mono"
     >
-      {done ? <Check size={11} className="text-success" /> : <Copy size={11} />}
+      {done ? <Check size={11} style={{ color: TONES.up }} /> : <Copy size={11} />}
       <span>{short}</span>
     </button>
   )
 }
 
-function LinkChip({ href, icon: Icon, children }) {
-  if (!href) return null
+function StancePill({ label, tone }) {
+  const color = TONES[tone] || TONES.blue
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      title={href}
-      className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border border-line2 bg-white/[0.04] text-muted hover:text-snow hover:border-accent/50 transition-colors max-w-[230px]"
+    <span
+      className="rounded-full px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em]"
+      style={{ color, background: `${color}14`, border: `1px solid ${color}55`, boxShadow: `0 0 18px ${color}33` }}
     >
-      <Icon size={11} className="flex-shrink-0 text-accent" />
-      <span className="truncate">{children}</span>
-      <ExternalLink size={9} className="flex-shrink-0 opacity-50" />
-    </a>
+      {label}
+    </span>
   )
 }
 
-function KV({ k, v, tone = '' }) {
+function MiniChange({ k, v }) {
+  const up = Number(v) >= 0
   return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-[11.5px] text-faint flex-shrink-0">{k}</span>
-      <span className={`text-[12.5px] font-mono text-snow/85 text-right break-all ${tone}`}>{v}</span>
+    <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] py-2.5 text-center">
+      <MicroLabel>{k}</MicroLabel>
+      <p className={`mt-0.5 text-[15px] font-bold ${up ? 'cv-delta up' : 'cv-delta down'}`}>{fmtPct(v)}</p>
     </div>
   )
 }
@@ -112,14 +89,14 @@ function PriceChart({ history, change }) {
   }, [history])
 
   const up = Number(change) >= 0
-  const stroke = up ? '#34d399' : '#f87171'
+  const stroke = up ? TONES.up : TONES.down
   const bars = (history || []).slice(-48)
 
   if (!line) {
     return (
-      <div className="h-[200px] flex flex-col items-center justify-center text-center px-6">
-        <Activity size={20} className="text-faint mb-2" />
-        <p className="text-[12.5px] text-muted leading-relaxed">
+      <div className="flex h-[180px] flex-col items-center justify-center px-6 text-center">
+        <Activity size={20} className="mb-2" style={{ color: '#66739a' }} />
+        <p className="text-[12.5px] leading-relaxed" style={{ color: '#8b98bd' }}>
           No hourly candles published for this pool yet. Every number on this page is still live —
           there is just nothing chartable on this market yet.
         </p>
@@ -129,31 +106,32 @@ function PriceChart({ history, change }) {
 
   return (
     <div>
-      <svg viewBox="0 0 100 34" preserveAspectRatio="none" className="w-full h-[150px]" aria-label="Hourly price action">
+      <svg viewBox="0 0 100 34" preserveAspectRatio="none" className="h-[150px] w-full" aria-label="Hourly price action">
         <defs>
-          <linearGradient id="tokenFill" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="tokenFillV2" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={stroke} stopOpacity="0.3" />
             <stop offset="100%" stopColor={stroke} stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path d={area} fill="url(#tokenFill)" />
+        <path d={area} fill="url(#tokenFillV2)" />
         <path d={line} fill="none" stroke={stroke} strokeWidth="0.7" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
       </svg>
-      <div className="flex items-end gap-[2px] h-9 mt-1">
+      <div className="mt-1 flex h-9 items-end gap-[2px]">
         {bars.map((b, i) => (
           <div
             key={i}
-            className="flex-1 rounded-[1px] bg-accent/30"
+            className="flex-1 rounded-[1px]"
             title={`${new Date(Number(b.t)).toLocaleString()} · ${fmtUsd(b.volume)}`}
-            style={{ height: `${Math.max(3, ((Number(b.volume) || 0) / maxVol) * 100)}%` }}
+            style={{
+              height: `${Math.max(3, ((Number(b.volume) || 0) / maxVol) * 100)}%`,
+              background: 'rgba(110, 168, 255, 0.32)',
+            }}
           />
         ))}
       </div>
-      <div className="flex items-center justify-between gap-3 mt-2 flex-wrap">
-        <p className="text-[11px] text-faint font-mono">
-          {bars.length} hourly candles · {fmtPrice(first)} → {fmtPrice(last)}
-        </p>
-        <span className={`text-[11px] font-mono ${changeColor(change)}`}>{fmtPct(change)} over the window</span>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <MicroLabel>{bars.length} hourly candles · {fmtPrice(first)} → {fmtPrice(last)}</MicroLabel>
+        <span className={`cv-delta ${up ? 'up' : 'down'}`}>{fmtPct(change)} over the window</span>
       </div>
     </div>
   )
@@ -233,40 +211,19 @@ function sanitizeProfile(d) {
 function Loading() {
   const steps = ['Reading the contract', 'Matching the network', 'Pulling price, cap & volume', 'Collecting logo, links & description']
   return (
-    <div className="space-y-4">
-      <div className="glass-panel relative overflow-hidden">
-        <div className="p-5 md:p-6">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-white/[0.06] animate-pulse flex-shrink-0" />
-            <div className="flex-1 space-y-2.5 max-w-sm">
-              <div className="h-5 w-40 rounded-md bg-white/[0.07] animate-pulse" />
-              <div className="h-3 w-56 rounded-md bg-white/[0.05] animate-pulse" />
-            </div>
-            <div className="ml-auto text-right">
-              <div className="h-3 w-14 rounded-md bg-white/[0.05] animate-pulse ml-auto" />
-              <div className="h-7 w-24 rounded-md bg-white/[0.07] animate-pulse mt-2" />
-            </div>
-          </div>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="cv-panel cv-ghost h-[132px]" />
+      <div className="cv-grid-stats">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="glass-panel !p-4">
-            <div className="h-2.5 w-16 rounded bg-white/[0.05] animate-pulse" />
-            <div className="h-6 w-20 rounded bg-white/[0.07] animate-pulse mt-2.5" />
-          </div>
-        ))}
-      </div>
-
-      <div className="glass-panel flex flex-col items-center py-9 px-6">
-        <div className="inline-flex items-center gap-3 text-snow">
-          <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="cv-panel flex flex-col items-center px-6 py-9">
+        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
           <span className="font-mono text-sm">resolving token from live markets…</span>
         </div>
-        <div className="mt-4 grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-center">
+        <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
           {steps.map((s) => (
-            <p key={s} className="text-[11.5px] font-mono text-faint">{s}…</p>
+            <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
           ))}
         </div>
       </div>
@@ -281,7 +238,6 @@ export default function TokenAnalysis() {
   const ca = searchParams.get('ca') || ''
   const chain = searchParams.get('chain') || ''
   const [runKey, rerun] = useRunKey()
-  const [view, setView] = useState('catalysts')
 
   const identity = ca ? { symbol: token, ca, chain } : null
   const { status, data, error } = useAgentData(
@@ -291,10 +247,10 @@ export default function TokenAnalysis() {
 
   if (!token) {
     return (
-      <div className="glass-panel flex flex-col items-center text-center py-14 px-6">
-        <Search size={22} className="text-faint mb-3" />
-        <h3 className="font-display font-semibold text-snow">No token selected</h3>
-        <p className="text-[13px] text-muted mt-1.5 max-w-sm">
+      <div className="cv-panel flex flex-col items-center px-6 py-14 text-center">
+        <Search size={22} className="mb-3" style={{ color: '#66739a' }} />
+        <h3 className="text-[15px] font-semibold" style={{ color: '#eef3ff' }}>No token selected</h3>
+        <p className="mt-1.5 max-w-sm text-[13px]" style={{ color: '#8b98bd' }}>
           Paste a contract address, ticker, or token name in the search bar above. A contract address
           always wins — that is the only identity that cannot be confused.
         </p>
@@ -305,7 +261,7 @@ export default function TokenAnalysis() {
   if (status === 'error') {
     return (
       <ErrorState error={error} onRetry={rerun}>
-        <p className="text-[11.5px] text-faint font-mono">
+        <p className="font-mono text-[11.5px] text-faint">
           {ca ? `contract ${ca}` : `query ${token}`} — no live market answered
         </p>
       </ErrorState>
@@ -330,98 +286,133 @@ export default function TokenAnalysis() {
     navigate(tokenHref('/dashboard/analysis', t))
   }
 
+  // ── the plain-English answer, derived only from live numbers ──
+  const sentBull = p.sentiment.bull || 0
+  const sentBear = p.sentiment.bear || 0
+  let stance = 'No tape yet'
+  let stanceTone = 'blue'
+  let conf = null
+  if (bullShare !== null) {
+    conf = Math.max(bullShare, 100 - bullShare)
+    stance = bullShare >= 55 ? 'Bullish tape' : bullShare <= 45 ? 'Bearish tape' : 'Contested tape'
+    stanceTone = bullShare >= 55 ? 'up' : bullShare <= 45 ? 'down' : 'amber'
+  } else if (sentBull + sentBear > 0) {
+    conf = Math.max(sentBull, sentBear)
+    stance = sentBull > sentBear ? 'Bullish read' : sentBull < sentBear ? 'Bearish read' : 'Even read'
+    stanceTone = sentBull > sentBear ? 'up' : sentBull < sentBear ? 'down' : 'amber'
+  }
+  const answer = `${p.symbol} trades at ${fmtPrice(p.priceUsd)}, ${fmtPct(p.change24h)} on the day`
+    + (volToCap !== null ? ` with ${fmtUsd(p.volume24h)} of tape (${volToCap.toFixed(1)}% of cap)` : '')
+    + (bullShare !== null ? ` and ${bullShare}% of trades hitting the bid` : '')
+    + ` — ${fmtUsd(p.liquidityUsd)} of liquidity on ${p.chainLabel || p.chain || 'chain'}.`
+
+  const sparkPts = p.priceHistory.slice(-24).map((x) => Number(x.price)).filter((n) => Number.isFinite(n))
+  const upTone = (p.change24h ?? 0) >= 0 ? 'up' : 'down'
+
+  const sentimentLeft = sentBull + sentBear > 0 ? sentBull : (bullShare ?? 50)
+  const sentimentRight = sentBull + sentBear > 0 ? sentBear : (bullShare !== null ? 100 - bullShare : 50)
+
+  const sources = [
+    { title: 'Project website', url: p.website || websites[0]?.url, tag: 'web' },
+    { title: 'X / Twitter', url: p.twitter || findSocial(/twitter|x\.com/i), tag: 'social' },
+    { title: 'Telegram', url: p.telegram || findSocial(/telegram/i), tag: 'social' },
+    { title: 'GitHub', url: p.github || findSocial(/github/i), tag: 'code' },
+    { title: 'Whitepaper', url: p.whitepaper, tag: 'docs' },
+    { title: 'Live chart venue', url: p.dexUrl, tag: 'dex' },
+    { title: 'Block explorer', url: p.explorer, tag: 'chain' },
+    { title: 'Market listing', url: p.cgUrl, tag: 'index' },
+  ].filter((s) => s.url)
+
   return (
-    <div className="space-y-4">
-      {/* ── identity hero: the token's own banner, logo, CA and venue ─────── */}
+    <div className="flex flex-col gap-4">
+      {/* ── identity: the token's own banner, logo, CA and venue ─────── */}
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: 'easeOut' }}
-        className="glass-panel relative overflow-hidden"
+        className="cv-panel relative overflow-hidden"
       >
         {p.banner && (
           <div
             aria-hidden="true"
-            className="absolute inset-0 opacity-35 bg-cover bg-center"
+            className="absolute inset-0 opacity-25 bg-cover bg-center"
             style={{ backgroundImage: `url(${p.banner})` }}
           />
         )}
-        <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-night/85 via-night/60 to-transparent" />
+        <div aria-hidden="true" className="absolute inset-0" style={{ background: 'linear-gradient(100deg, rgba(6,9,22,0.94), rgba(6,9,22,0.72) 55%, rgba(6,9,22,0.45))' }} />
         <div className="relative p-5 md:p-6">
-          <div className="flex items-start justify-between gap-5 flex-wrap">
-            <div className="flex items-start gap-4 min-w-0">
-              {p.logo ? (
-                <img src={p.logo} alt="" className="w-14 h-14 rounded-2xl object-cover border border-line2 flex-shrink-0" />
-              ) : (
-                <div className="w-14 h-14 rounded-2xl grid place-items-center border border-line2 bg-white/[0.04] flex-shrink-0">
-                  <Search size={20} className="text-accent" />
-                </div>
-              )}
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div className="flex min-w-0 items-start gap-4">
+              <TokenLogo src={p.logo} symbol={p.symbol} size={54} />
               <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="font-display text-xl md:text-2xl font-bold text-snow tracking-tight leading-none truncate max-w-[15ch]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="max-w-[16ch] truncate text-xl font-bold tracking-tight md:text-2xl" style={{ color: '#f4f8ff' }}>
                     {p.name}
                   </h1>
-                  <span className="font-mono text-[15px] text-accent">${p.symbol}</span>
-                  {p.chainLabel && (
-                    <span className="text-[10px] font-mono uppercase tracking-[0.12em] px-2 py-0.5 rounded-full border border-line2 text-muted">
-                      {p.chainLabel}
-                    </span>
-                  )}
+                  <span className="font-mono text-[15px]" style={{ color: TONES.blue }}>${p.symbol}</span>
+                  {p.chainLabel && <span className="cv-chip !py-0.5">{p.chainLabel}</span>}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <CopyChip value={p.ca} />
+                  {(p.categories || []).slice(0, 4).map((c) => (
+                    <span key={c} className="cv-chip !py-0.5 opacity-80">{c}</span>
+                  ))}
                 </div>
                 {p.description && (
-                  <p className="text-[12.5px] text-snow/70 leading-relaxed mt-3 max-w-2xl break-words">
+                  <p className="mt-3 max-w-2xl break-words text-[12.5px] leading-relaxed" style={{ color: '#aebfe4' }}>
                     {p.description}
                   </p>
                 )}
               </div>
             </div>
-            <div className="text-right ml-auto">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Price</p>
-              <p className="font-display text-3xl font-bold text-snow leading-none mt-1.5">{fmtPrice(p.priceUsd)}</p>
-              <p className={`text-[12px] font-mono mt-1.5 ${changeColor(p.change24h)}`}>
+            <div className="ml-auto text-right">
+              <MicroLabel>Price</MicroLabel>
+              <p className="mt-1 text-3xl font-bold leading-none" style={{ color: '#f4f8ff' }}>{fmtPrice(p.priceUsd)}</p>
+              <p className={`cv-delta mt-1.5 !text-[12px] ${upTone === 'up' ? 'up' : 'down'}`}>
                 {fmtPct(p.change24h)} · 24h
               </p>
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 mt-4">
-            <LinkChip href={p.website || websites[0]?.url} icon={Globe}>Website</LinkChip>
-            <LinkChip href={p.twitter || findSocial(/twitter|x\.com/i)} icon={Twitter}>X</LinkChip>
-            <LinkChip href={p.telegram || findSocial(/telegram/i)} icon={MessageCircle}>Telegram</LinkChip>
-            <LinkChip href={p.github || findSocial(/github/i)} icon={Github}>GitHub</LinkChip>
-            <LinkChip href={p.whitepaper} icon={FileText}>Whitepaper</LinkChip>
-            <LinkChip href={p.dexUrl} icon={Layers}>Live chart</LinkChip>
-            <LinkChip href={p.explorer} icon={Search}>Explorer</LinkChip>
-            <LinkChip href={p.cgUrl} icon={ExternalLink}>Listing</LinkChip>
-            {(p.categories || []).slice(0, 4).map((c) => (
-              <span key={c} className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border border-line text-faint">
-                {c}
-              </span>
-            ))}
-          </div>
         </div>
       </motion.div>
 
-      {/* ── live numbers ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-        <Stat label="Market Cap" value={fmtUsd(p.marketCap)} sub={p.fdv ? `FDV ${fmtUsd(p.fdv)}` : 'FDV unavailable'} delay={0.02} />
-        <Stat
+      {/* ── the answer, first ── */}
+      <AnswerBanner
+        icon={Gauge}
+        kicker={`Token analysis · ${p.symbol}`}
+        answer={answer}
+        stance={<StancePill label={stance} tone={stanceTone} />}
+        confidence={conf}
+        confidenceTone={stanceTone}
+        chips={[
+          p.chainLabel || p.chain || 'chain unknown',
+          p.cgRank ? `global rank #${fmtNum(p.cgRank)}` : 'not globally ranked',
+          p.pairAgeDays !== null && p.pairAgeDays !== undefined
+            ? `pool age ${p.pairAgeDays >= 365 ? `${(p.pairAgeDays / 365).toFixed(1)}y` : `${Math.round(p.pairAgeDays)}d`}`
+            : 'pool age unknown',
+          `${fmtUsd(p.liquidityUsd)} liquidity`,
+        ].filter(Boolean)}
+      />
+
+      {/* ── live numbers as glowing tiles ── */}
+      <div className="cv-grid-stats">
+        <StatTile icon={Coins} label="Market Cap" value={fmtUsd(p.marketCap)} foot={p.fdv ? `FDV ${fmtUsd(p.fdv)}` : 'FDV unavailable'} delay={0.02} />
+        <StatTile
+          icon={Activity}
           label="24h Volume"
           value={fmtUsd(p.volume24h)}
-          sub={volToCap !== null ? `${volToCap.toFixed(1)}% of cap` : 'no tape'}
+          foot={volToCap !== null ? `${volToCap.toFixed(1)}% of cap` : 'no tape'}
           delay={0.06}
         />
-        <Stat
+        <StatTile
+          icon={Wallet}
           label="Liquidity"
           value={fmtUsd(p.liquidityUsd)}
-          sub={p.poolLiquidityUsd ? `pool ${fmtUsd(p.poolLiquidityUsd)}` : 'pool reserve n/a'}
+          foot={p.poolLiquidityUsd ? `pool ${fmtUsd(p.poolLiquidityUsd)}` : 'pool reserve n/a'}
           delay={0.1}
         />
-        <Stat
+        <StatTile
+          icon={Timer}
           label="Pair Age"
           value={
             p.pairAgeDays === null || p.pairAgeDays === undefined
@@ -430,131 +421,115 @@ export default function TokenAnalysis() {
                 ? `${(p.pairAgeDays / 365).toFixed(1)}y`
                 : `${Math.round(p.pairAgeDays)}d`
           }
-          sub={p.pairCreatedAt ? new Date(p.pairCreatedAt).toLocaleDateString() : 'unlisted pool'}
+          foot={p.pairCreatedAt ? new Date(p.pairCreatedAt).toLocaleDateString() : 'unlisted pool'}
+          delay={0.14}
+        />
+        <StatTile
+          icon={Gauge}
+          label="Tape 24h"
+          value={totalTx ? `${fmtNum(buys)} / ${fmtNum(sells)}` : '—'}
+          delta={bullShare !== null ? bullShare : undefined}
+          deltaTone={bullShare !== null ? (bullShare >= 50 ? 'up' : 'down') : undefined}
+          foot={bullShare !== null ? `${bullShare}% buys · ${fmtNum(p.uniqueBuyers24h || 0)} wallets` : 'no trades indexed'}
           delay={0.18}
         />
-        <Stat
-          label="Tape 24h"
-          value={<span className="text-[17px] leading-7">{totalTx ? `${fmtNum(buys)} / ${fmtNum(sells)}` : '—'}</span>}
-          sub={bullShare !== null ? `${bullShare}% buys · ${fmtNum(p.uniqueBuyers24h || 0)} wallets` : 'no trades indexed'}
-          tone={bullShare === null ? '' : bullShare >= 50 ? 'text-success' : 'text-danger'}
+        <StatTile
+          icon={Sparkles}
+          label="Price"
+          value={fmtPrice(p.priceUsd)}
+          delta={p.change24h ?? undefined}
+          spark={sparkPts}
+          sparkTone={upTone}
+          foot={`${fmtPct(p.change1h)} 1h · ${fmtPct(p.change6h)} 6h`}
           delay={0.22}
         />
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
-          <Panel
-            title={`Price Action · ${(p.priceHistory || []).length} live points`}
+      <div className="cv-grid-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          <PanelV2
             icon={Activity}
+            title="Price Action"
+            right={<MicroLabel>{p.chartSource || 'no candle feed'}</MicroLabel>}
             delay={0.16}
-            actions={
-              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-faint truncate">
-                {p.chartSource || 'no candle feed'}
-              </span>
-            }
           >
             <PriceChart history={p.priceHistory} change={p.change24h} />
-            <div className="grid grid-cols-3 gap-2 mt-4">
-              {[['1h', p.change1h], ['6h', p.change6h], ['24h', p.change24h]].map(([k, v]) => (
-                <div key={k} className="text-center rounded-xl border border-line bg-white/[0.03] py-2.5">
-                  <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-faint">{k}</p>
-                  <p className={`font-display text-[15px] font-bold mt-0.5 ${changeColor(v)}`}>{fmtPct(v)}</p>
-                </div>
-              ))}
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <MiniChange k="1h" v={p.change1h} />
+              <MiniChange k="6h" v={p.change6h} />
+              <MiniChange k="24h" v={p.change24h} />
             </div>
-          </Panel>
+          </PanelV2>
 
-          <Panel title="Supply & Valuation" icon={Wallet} delay={0.24}>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-5 gap-y-4">
-              {[
-                ['Circulating', p.circulatingSupply ? `${fmtNum(p.circulatingSupply)} ${p.symbol}` : '—'],
-                ['Total Supply', p.totalSupply ? `${fmtNum(p.totalSupply)} ${p.symbol}` : '—'],
-                ['MC / FDV', p.marketCapFdvRatio ? p.marketCapFdvRatio.toFixed(2) : '—'],
-                ['Global Rank', p.cgRank ? `#${fmtNum(p.cgRank)}` : 'not ranked'],
-                ['Watchlists', p.watchers ? fmtNum(p.watchers) : '—'],
-                ['Pool Reserve', fmtUsd(p.totalReserveUsd)],
-                ['All-Time High', p.ath ? fmtPrice(p.ath) : '—'],
-                ['vs ATH', p.athChangePct === null || p.athChangePct === undefined ? '—' : fmtPct(p.athChangePct)],
-                ['All-Time Low', p.atl ? fmtPrice(p.atl) : '—'],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-faint">{k}</p>
-                  <p className="font-display text-[15px] font-semibold text-snow mt-1">{v}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel
-            title={view === 'catalysts' ? 'Catalysts' : 'Risk Flags'}
-            icon={view === 'catalysts' ? Sparkles : AlertTriangle}
-            delay={0.3}
-            actions={
-              <div className="flex gap-2">
-                <Chip active={view === 'catalysts'} onClick={() => setView('catalysts')}>Catalysts</Chip>
-                <Chip active={view === 'risks'} onClick={() => setView('risks')}>Risks</Chip>
+          <PanelV2 icon={Wallet} title="Supply & Valuation" delay={0.24}>
+            {[
+              ['Circulating', p.circulatingSupply ? `${fmtNum(p.circulatingSupply)} ${p.symbol}` : '—'],
+              ['Total Supply', p.totalSupply ? `${fmtNum(p.totalSupply)} ${p.symbol}` : '—'],
+              ['MC / FDV', p.marketCapFdvRatio ? p.marketCapFdvRatio.toFixed(2) : '—'],
+              ['Global Rank', p.cgRank ? `#${fmtNum(p.cgRank)}` : 'not ranked'],
+              ['Watchlists', p.watchers ? fmtNum(p.watchers) : '—'],
+              ['Pool Reserve', fmtUsd(p.totalReserveUsd)],
+              ['All-Time High', p.ath ? fmtPrice(p.ath) : '—'],
+              ['vs ATH', p.athChangePct === null || p.athChangePct === undefined ? '—' : fmtPct(p.athChangePct)],
+              ['All-Time Low', p.atl ? fmtPrice(p.atl) : '—'],
+            ].map(([k, v]) => (
+              <div key={k} className="cv-rowline">
+                <span className="cv-rowline-label">{k}</span>
+                <span className="cv-rowline-cell text-right font-mono text-[12px]">{v}</span>
               </div>
-            }
-          >
-            <ul className="space-y-2.5">
-              {(view === 'catalysts' ? p.catalysts || [] : p.risks || []).map((c, i) => {
-                const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
-                return (
-                  <li key={i} className="flex items-start gap-2.5 text-[13px] text-snow/75 leading-relaxed">
-                    {view === 'catalysts'
-                      ? <Check size={13} className="text-success mt-1 flex-shrink-0" />
-                      : <AlertTriangle size={13} className="text-danger mt-1 flex-shrink-0" />}
-                    <span>{text}</span>
-                  </li>
-                )
-              })}
-              {(view === 'catalysts' ? p.catalysts || [] : p.risks || []).length === 0 && (
-                <li className="text-[13px] text-faint">Nothing material flagged on this asset right now.</li>
-              )}
-            </ul>
-          </Panel>
+            ))}
+          </PanelV2>
         </div>
 
-        <div className="space-y-4">
-          <Panel title="Crowd Sentiment" icon={Sparkles} delay={0.2}>
-            <SentimentSplit sentiment={p.sentiment} />
-            <p className="text-[12px] text-snow/70 leading-relaxed mt-4">
-              {bullShare === null
-                ? 'No 24h trade tape indexed for this pool yet — the stance is read off price structure instead.'
-                : `${fmtNum(buys)} buys vs ${fmtNum(sells)} sells in 24h, from ${fmtNum(p.uniqueBuyers24h || 0)} buyers and ${fmtNum(p.uniqueSellers24h || 0)} sellers.`}
-            </p>
-          </Panel>
+        <div className="flex min-w-0 flex-col gap-4">
+          <PanelV2 icon={Sparkles} title="Crowd Sentiment" delay={0.2} right={<MicroLabel>live tape</MicroLabel>}>
+            <ScoreBar left={sentimentLeft} right={sentimentRight} leftLabel="Bull" rightLabel="Bear" />
+            <InsightRow
+              icon={Activity}
+              tone={stanceTone}
+              title={
+                bullShare === null
+                  ? 'No 24h trade tape indexed for this pool yet'
+                  : `${fmtNum(buys)} buys vs ${fmtNum(sells)} sells in 24h`
+              }
+              body={
+                bullShare === null
+                  ? 'The stance above is read off price structure instead of order flow.'
+                  : `From ${fmtNum(p.uniqueBuyers24h || 0)} unique buyers and ${fmtNum(p.uniqueSellers24h || 0)} unique sellers.`
+              }
+            />
+          </PanelV2>
 
-          <Panel title="Identity & Sources" icon={ShieldAlert} delay={0.26}>
-            <div className="space-y-2">
-              <KV k="Chain" v={p.chainLabel || p.chain || 'unknown'} />
-              <KV k="Contract" v={p.ca || 'not published'} />
-              <KV k="Pool / pair" v={p.pairAddress || '—'} />
+          <PanelV2 icon={ShieldAlert} title="Identity & Sources" delay={0.26}>
+            <div className="cv-rowline">
+              <span className="cv-rowline-label">Chain</span>
+              <span className="cv-rowline-cell text-right">{p.chainLabel || p.chain || 'unknown'}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5 mt-4">
-              {[
-                p.ca ? 'contract verified' : null,
-                p.priceHistory?.length ? 'price history live' : null,
-                p.description ? 'project info live' : null,
-                p.logo ? 'artwork live' : null,
-              ]
-                .filter(Boolean)
-                .map((s) => (
-                  <span key={s} className="text-[10px] font-mono uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border border-line text-faint">
-                    {s}
-                  </span>
-                ))}
+            <div className="cv-rowline">
+              <span className="cv-rowline-label">Contract</span>
+              <span className="cv-rowline-cell truncate text-right font-mono text-[11px]">{p.ca || 'not published'}</span>
             </div>
-          </Panel>
+            <div className="cv-rowline">
+              <span className="cv-rowline-label">Pool / pair</span>
+              <span className="cv-rowline-cell truncate text-right font-mono text-[11px]">{p.pairAddress || '—'}</span>
+            </div>
+            <div className="mt-3">
+              {sources.map((s) => (
+                <SourceRow key={s.tag + s.title} title={s.title} url={s.url} tag={s.tag} />
+              ))}
+              {sources.length === 0 && (
+                <p className="text-[11.5px]" style={{ color: '#66739a' }}>No public links published for this token.</p>
+              )}
+            </div>
+          </PanelV2>
 
           {candidates.length > 1 && (
-            <Panel title={`Same ticker elsewhere · ${candidates.length}`} icon={Layers} delay={0.32}>
-              <p className="text-[11.5px] text-faint leading-relaxed mb-3">
+            <PanelV2 icon={Layers} title={`Same ticker elsewhere · ${candidates.length}`} delay={0.32}>
+              <p className="mb-3 text-[11.5px] leading-relaxed" style={{ color: '#8b98bd' }}>
                 “{p.symbol}” is not unique. These are the other live markets that matched — click one to
                 re-pin the whole console.
               </p>
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 {candidates.map((c) => {
                   const current = String(c.ca).toLowerCase() === String(p.ca).toLowerCase()
                   const Icon = current ? Check : ArrowUpRight
@@ -564,39 +539,57 @@ export default function TokenAnalysis() {
                       type="button"
                       disabled={current}
                       onClick={() => go({ symbol: c.symbol, name: c.name, ca: c.ca, chain: c.chain, logo: c.logo })}
-                      className={`w-full flex items-center gap-2.5 text-left rounded-xl border px-3 py-2 transition-colors ${
-                        current
-                          ? 'border-accent/40 bg-accent/10 cursor-default'
-                          : 'border-line2 bg-white/[0.03] hover:border-accent/40'
-                      }`}
+                      className="cv-source w-full"
+                      style={current ? { borderColor: 'rgba(47,224,176,0.4)', background: 'rgba(47,224,176,0.08)' } : undefined}
                     >
-                      {c.logo ? (
-                        <img src={c.logo} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <span className="w-6 h-6 rounded-full bg-white/5 flex-shrink-0" />
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[12px] text-snow truncate">{c.name}</span>
-                        <span className="block text-[10.5px] text-faint font-mono truncate">
+                      <TokenLogo src={c.logo} symbol={c.symbol} size={24} />
+                      <span className="min-w-0 flex-1 text-left">
+                        <span className="block truncate text-[12px]" style={{ color: '#eaf2ff' }}>{c.name}</span>
+                        <span className="block truncate font-mono text-[10px]" style={{ color: '#66739a' }}>
                           {c.chainLabel || c.chain} · {fmtUsd(c.liquidityUsd)} liq
                         </span>
                       </span>
-                      <Icon size={13} className={current ? 'text-accent' : 'text-faint'} />
+                      <Icon size={13} style={{ color: current ? TONES.up : '#66739a' }} />
                     </button>
                   )
                 })}
               </div>
-            </Panel>
+            </PanelV2>
           )}
 
-          <Panel title={`Run the stack on ${p.symbol}`} icon={Microscope} delay={0.36}>
+          <PanelV2 icon={Microscope} title={`Run the stack on ${p.symbol}`} delay={0.36}>
             <div className="flex flex-wrap gap-2">
-              <Link to={tokenHref('/dashboard/deep', p)} className="glass-chip"><Microscope size={12} /> Deep Analysis</Link>
-              <Link to={tokenHref('/dashboard/council', p)} className="glass-chip"><Swords size={12} /> Council</Link>
-              <Link to={tokenHref('/dashboard/risk', p)} className="glass-chip"><ShieldAlert size={12} /> Risk Desk</Link>
+              <Link to={tokenHref('/dashboard/deep', p)} className="cv-chip"><Microscope size={12} /> Deep Analysis</Link>
+              <Link to={tokenHref('/dashboard/council', p)} className="cv-chip"><Swords size={12} /> Council</Link>
+              <Link to={tokenHref('/dashboard/risk', p)} className="cv-chip"><ShieldAlert size={12} /> Risk Desk</Link>
+              <Link to={tokenHref('/dashboard/sentiment', p)} className="cv-chip"><Activity size={12} /> Sentiment</Link>
             </div>
-          </Panel>
+          </PanelV2>
         </div>
+      </div>
+
+      {/* ── catalysts vs risks: the evidence, side by side ── */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <PanelV2 icon={Sparkles} title="Catalysts" right={<MicroLabel>{(p.catalysts || []).length} signals</MicroLabel>} delay={0.3}>
+          {(p.catalysts || []).length === 0 ? (
+            <p className="text-[12px]" style={{ color: '#66739a' }}>Nothing material flagged on this asset right now.</p>
+          ) : (
+            (p.catalysts || []).map((c, i) => {
+              const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
+              return <InsightRow key={i} icon={Check} tone="up" title={text} />
+            })
+          )}
+        </PanelV2>
+        <PanelV2 icon={AlertTriangle} title="Risk Flags" right={<MicroLabel>{(p.risks || []).length} flags</MicroLabel>} delay={0.34}>
+          {(p.risks || []).length === 0 ? (
+            <p className="text-[12px]" style={{ color: '#66739a' }}>No risk flags raised on this asset right now.</p>
+          ) : (
+            (p.risks || []).map((c, i) => {
+              const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
+              return <InsightRow key={i} icon={AlertTriangle} tone="down" title={text} />
+            })
+          )}
+        </PanelV2>
       </div>
     </div>
   )

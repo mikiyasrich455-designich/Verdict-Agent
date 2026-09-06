@@ -1,120 +1,132 @@
 // Market Overview agent — regime, fear & greed, breadth, movers.
-import { Globe, RefreshCw, TrendingUp, TrendingDown, ArrowRight, Crosshair } from 'lucide-react'
+import { Globe, RefreshCw, TrendingUp, TrendingDown, ArrowRight, Crosshair, Activity, Coins, Gauge, Layers } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchMarketOverview, fetchVerdict, fetchTokenProfile } from '../../lib/api'
-import { PageHeader, Panel, Stat, fmtUsd, fmtPct, changeColor, ErrorState } from '../../components/DashUI'
-import { PageSkeleton } from '../../components/Loaders'
-import { SpinnerCard } from '../../components/ShadcnLoaders'
-import VerdictBadge, { verdictColor } from '../../components/VerdictBadge'
+import { fmtUsd, fmtPrice, fmtPct, ErrorState } from '../../components/DashUI'
+import {
+  PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow,
+  TokenLogo, MicroLabel, Spark, Ring, TONES,
+} from '../../components/ConsoleUI'
 import { getStoredToken } from '../../components/DashboardShell'
 
-const REGIME_TONE = {
-  'risk-on': 'text-success',
-  neutral: 'text-warning',
-  'risk-off': 'text-danger',
+const REGIME_TONE = { 'risk-on': 'up', neutral: 'amber', 'risk-off': 'down' }
+const VERDICT_TONE = { BUY: 'up', HOLD: 'amber', AVOID: 'down' }
+
+function StancePill({ label, tone }) {
+  const color = TONES[tone] || TONES.blue
+  return (
+    <span
+      className="rounded-full px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em]"
+      style={{ color, background: `${color}14`, border: `1px solid ${color}55`, boxShadow: `0 0 18px ${color}33` }}
+    >
+      {label}
+    </span>
+  )
 }
 
-function FearGreedDial({ value, label }) {
-  const angle = (value / 100) * 180
-  const tone = value >= 60 ? '#34d399' : value >= 45 ? '#fbbf24' : '#f87171'
+function MarketSkeleton() {
   return (
-    <div className="flex flex-col items-center py-2">
-      <div className="relative w-full max-w-[240px]">
-        <svg viewBox="0 0 200 110" className="w-full">
-          <defs>
-            <linearGradient id="fgArc" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="#f87171" />
-              <stop offset="0.5" stopColor="#fbbf24" />
-              <stop offset="1" stopColor="#34d399" />
-            </linearGradient>
-          </defs>
-          <path d="M 16 100 A 84 84 0 0 1 184 100" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="11" strokeLinecap="round" />
-          <path
-            d="M 16 100 A 84 84 0 0 1 184 100"
-            fill="none"
-            stroke="url(#fgArc)"
-            strokeWidth="11"
-            strokeLinecap="round"
-            strokeDasharray={`${(angle / 180) * 264} 264`}
-            style={{ transition: 'stroke-dasharray 0.8s ease' }}
-          />
-          <text x="100" y="88" textAnchor="middle" fill="#eef2ff" fontSize="30" fontWeight="700" fontFamily="'Plus Jakarta Sans', sans-serif">
-            {value}
-          </text>
-        </svg>
+    <div className="flex flex-col gap-4">
+      <div className="cv-panel cv-ghost h-[132px]" />
+      <div className="cv-grid-stats">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
-      <span className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: tone }}>
-        {label}
-      </span>
+      <div className="cv-grid-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="cv-panel cv-ghost h-[220px]" />
+          <div className="cv-panel cv-ghost h-[260px]" />
+        </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="cv-panel cv-ghost h-[180px]" />
+          <div className="cv-panel cv-ghost h-[180px]" />
+        </div>
+      </div>
     </div>
   )
 }
 
 function TokenFocusStrip({ token, focus }) {
+  const focusSymbol = token.toUpperCase()
+
+  if (focus.status === 'error') {
+    return (
+      <PanelV2 icon={Crosshair} title={`Token in focus · ${focusSymbol}`} delay={0.04}>
+        <ErrorState error={focus.error}>
+          <p className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>
+            The market overview can still load even when the focused-token engine is unavailable.
+          </p>
+        </ErrorState>
+      </PanelV2>
+    )
+  }
+
   if (focus.status !== 'ready' || !focus.data) {
     return (
-      <div className="mb-4">
-        <SpinnerCard
-          label={`Running ${token.toUpperCase()} through the verdict engine`}
-          sub="Verdict, price and confidence for your token in this market context…"
-        />
-      </div>
+      <PanelV2 icon={Crosshair} title={`Token in focus · ${focusSymbol}`} delay={0.04}>
+        <div className="flex flex-col gap-4">
+          <div className="cv-ghost h-[92px]" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[58px]" />)}
+          </div>
+          <p className="text-[12px]" style={{ color: '#8b98bd' }}>
+            Running {focusSymbol} through the verdict engine — verdict, price and confidence for your token in this market context…
+          </p>
+        </div>
+      </PanelV2>
     )
   }
 
   const { v, p } = focus.data
+  const displaySymbol = p.symbol || focusSymbol
+  const sparkPts = (p.priceHistory || []).slice(-24).map((x) => Number(x.price)).filter((n) => Number.isFinite(n))
+  const upTone = Number(v.change24h) >= 0 ? 'up' : 'down'
+  const verdictTone = VERDICT_TONE[v.verdict] || 'blue'
+  const price = fmtPrice(v.priceUsd)
+
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="glass-panel !p-5 mb-4"
-      style={{ borderColor: `${verdictColor(v.verdict)}38`, boxShadow: `0 0 34px ${verdictColor(v.verdict)}10` }}
-    >
-      <div className="flex flex-col lg:flex-row lg:items-center gap-5">
-        <div className="flex items-center gap-4 lg:w-[280px] flex-shrink-0">
-          <VerdictBadge verdict={v.verdict} />
+    <PanelV2 icon={Crosshair} title={`Token in focus · ${displaySymbol}`} right={<MicroLabel>{p.name || displaySymbol}</MicroLabel>} delay={0.04}>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 items-start gap-4">
+          <TokenLogo src={p.logo} symbol={displaySymbol} size={48} />
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
-              <Crosshair size={11} /> Token in focus
-            </p>
-            <p className="font-display text-lg font-bold text-snow leading-tight mt-1">{p.symbol}</p>
-            <p className="text-[11px] text-faint truncate">{p.name}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4 flex-1">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Price</p>
-            <p className="font-display text-lg font-bold text-snow mt-1">{fmtUsd(v.priceUsd)}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">24h</p>
-            <p className={`font-display text-lg font-bold mt-1 ${changeColor(v.change24h)}`}>{fmtPct(v.change24h)}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Confidence</p>
-            <div className="flex items-center gap-2 mt-2">
-              <div className="flex-1 h-1.5 rounded-full bg-white/6 overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-[#7aa2ff] to-[#2b68ff]" style={{ width: `${v.confidence}%` }} />
-              </div>
-              <span className="font-mono text-[12px] text-snow/85">{v.confidence}</span>
+            <StancePill label={v.verdict} tone={verdictTone} />
+            <div className="mt-2.5">
+              <MicroLabel>Price</MicroLabel>
+              <p className="mt-1 text-2xl font-bold leading-none" style={{ color: '#f4f8ff' }}>{price === '—' ? 'no price published' : price}</p>
             </div>
+            <p className={`cv-delta mt-1.5 !text-[12px] ${upTone}`}>{fmtPct(v.change24h)} · 24h</p>
           </div>
         </div>
 
-        <div className="flex gap-2 flex-shrink-0">
-          <Link to={`/dashboard/analysis?token=${p.symbol}`} className="glass-chip justify-center">
-            Full analysis <ArrowRight size={12} />
-          </Link>
-          <Link to={`/dashboard/council?token=${p.symbol}`} className="glass-chip justify-center">
-            Send to Council
-          </Link>
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] p-3">
+            <MicroLabel>Bull score</MicroLabel>
+            <p className="mt-1 text-[18px] font-bold" style={{ color: TONES.up }}>{v.bullScore}</p>
+          </div>
+          <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] p-3">
+            <MicroLabel>Bear score</MicroLabel>
+            <p className="mt-1 text-[18px] font-bold" style={{ color: TONES.down }}>{v.bearScore}</p>
+          </div>
+          <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] p-3">
+            <MicroLabel>24h tape</MicroLabel>
+            {sparkPts.length > 1 ? (
+              <div className="mt-1"><Spark points={sparkPts} tone={upTone} w={72} h={28} /></div>
+            ) : (
+              <p className="mt-1 text-[12px]" style={{ color: '#66739a' }}>no hourly series published</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-4 lg:flex-col lg:items-end">
+          <Ring value={v.confidence} size={72} tone={verdictTone} label="conf" sub="verdict confidence" />
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <Link to={`/dashboard/analysis?token=${displaySymbol}`} className="cv-chip">Full analysis <ArrowRight size={12} /></Link>
+            <Link to={`/dashboard/council?token=${displaySymbol}`} className="cv-chip">Send to Council</Link>
+          </div>
         </div>
       </div>
-    </motion.section>
+    </PanelV2>
   )
 }
 
@@ -132,130 +144,169 @@ export default function MarketOverview() {
 
   if (status === 'error') {
     return (
-      <>
-        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'live market data' }} />
+      <div className="flex flex-col gap-4">
         {token && <TokenFocusStrip token={token} focus={focus} />}
         <ErrorState error={agentError} onRetry={() => rerun()} />
-      </>
+      </div>
     )
   }
 
   if (status !== 'ready' || !data) {
     return (
-      <>
-        <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'live market data' }} />
+      <div className="flex flex-col gap-4">
         {token && <TokenFocusStrip token={token} focus={focus} />}
-        <PageSkeleton />
-      </>
+        <MarketSkeleton />
+      </div>
     )
   }
 
   const d = data
   const declining = Math.max(0, 100 - d.breadth.advancing)
   const focusSymbol = focus.data?.p?.symbol || token.toUpperCase()
+  const breadthConviction = Math.max(d.breadth.advancing, declining)
+  const regimeTone = REGIME_TONE[d.regime] || 'blue'
+  const capUsd = fmtUsd(Number(d.totalMarketCap) * 1e12)
+  const volUsd = fmtUsd(Number(d.volume24h) * 1e9)
+  const breadthRead = d.breadth.advancing >= 55
+    ? 'Broad participation — rallies are confirmed by the tape, not just majors.'
+    : d.breadth.advancing >= 40
+      ? 'Mixed participation — leadership is narrow; follow the movers, not the index.'
+      : 'Narrow tape — downside breadth warns against aggressive entries.'
+  const fearRead = d.fearGreed >= 60
+    ? 'Confidence is elevated — momentum trades work, euphoria risk rises.'
+    : d.fearGreed >= 45
+      ? 'Balanced sentiment — selectivity beats conviction here.'
+      : 'Fear dominates — capital preservation mode, dips get bought slowly.'
+  const regimeRead = d.regime === 'risk-on'
+    ? 'Council and analysis agents run aggressive playbooks in this regime.'
+    : d.regime === 'risk-off'
+      ? 'Risk Desk tightens stops automatically when the regime flips risk-off.'
+      : 'Neutral regime — agents weight catalysts over momentum.'
+  const answer = `The market is ${d.regime} with Fear & Greed at ${d.fearGreed} (${d.fgLabel}). `
+    + `${d.breadth.advancing}% of tracked assets are advancing against ${declining}% declining, `
+    + `BTC dominance is ${d.btcDominance}%, total cap is ${capUsd}, and 24h turnover is ${volUsd}.`
 
   return (
-    <>
-      <PageHeader
+    <div className="flex flex-col gap-4">
+      <AnswerBanner
         icon={Globe}
-        title="Market Overview"
-        subtitle="Reading the regime so every other agent knows the weather."
-        source={{ mode: 'live', name: 'live market data' }}
+        kicker="Market Overview · regime read"
+        answer={answer}
+        stance={<StancePill label={d.regime} tone={regimeTone} />}
+        confidence={breadthConviction}
+        confidenceTone={d.breadth.advancing >= declining ? 'up' : 'down'}
+        chips={[
+          `${d.movers.length} published movers`,
+          `${d.breadth.unchanged || 0}% unchanged`,
+          `as of ${new Date(d.asOf).toLocaleTimeString()}`,
+        ]}
       >
-        <button onClick={rerun} className="glass-chip">
+        <button type="button" onClick={rerun} className="cv-chip">
           <RefreshCw size={12} /> Refresh
         </button>
-      </PageHeader>
+      </AnswerBanner>
 
       {token && <TokenFocusStrip token={token} focus={focus} />}
 
-      {/* headline stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Stat label="Regime" value={<span className={REGIME_TONE[d.regime] || 'text-snow'}>{d.regime.toUpperCase()}</span>} sub="Market posture right now" delay={0.02} />
-        <Stat label="BTC Dominance" value={`${d.btcDominance}%`} sub="Share of total cap" delay={0.06} />
-        <Stat label="Total Market Cap" value={`$${d.totalMarketCap.toFixed(2)}T`} sub="All crypto assets" delay={0.1} />
-        <Stat label="24h Volume" value={`$${d.volume24h.toFixed(1)}B`} sub="Cross-market turnover" delay={0.14} />
+      <div className="cv-grid-stats">
+        <StatTile icon={Gauge} label="Fear & Greed" value={d.fearGreed} foot={d.fgLabel} delay={0.02} />
+        <StatTile icon={Coins} label="BTC Dominance" value={`${d.btcDominance}%`} foot="share of total cap" delay={0.06} />
+        <StatTile icon={Layers} label="Total Market Cap" value={capUsd} foot="all tracked crypto assets" delay={0.1} />
+        <StatTile icon={Activity} label="24h Volume" value={volUsd} foot="cross-market turnover" delay={0.14} />
       </div>
 
-      <div className="grid lg:grid-cols-5 gap-4 mb-4">
-        {/* fear & greed */}
-        <Panel title="Fear & Greed Index" delay={0.16} className="lg:col-span-2">
-          <FearGreedDial value={d.fearGreed} label={d.fgLabel} />
-          <p className="text-[12px] text-muted text-center leading-relaxed mt-1">
-            {d.fearGreed >= 60
-              ? 'Confidence is elevated — momentum trades work, euphoria risk rises.'
-              : d.fearGreed >= 45
-              ? 'Balanced sentiment — selectivity beats conviction here.'
-              : 'Fear dominates — capital preservation mode, dips get bought slowly.'}
-          </p>
-        </Panel>
-
-        {/* breadth */}
-        <Panel title="Market Breadth" delay={0.2} className="lg:col-span-2">
-          <div className="flex items-end justify-between mb-2">
-            <div>
-              <p className="font-display text-2xl font-bold text-success">{d.breadth.advancing}%</p>
-              <p className="text-[11px] text-muted mt-0.5 flex items-center gap-1"><TrendingUp size={11} /> advancing</p>
+      <div className="cv-grid-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          <PanelV2 icon={TrendingUp} title="Market Breadth" right={<MicroLabel>advancing vs declining</MicroLabel>} delay={0.18}>
+            <ScoreBar
+              left={d.breadth.advancing}
+              right={declining}
+              leftLabel="Advancing"
+              rightLabel="Declining"
+              leftTone="up"
+              rightTone="down"
+            />
+            <div className="mt-4">
+              <div className="cv-rowline">
+                <span className="cv-rowline-label">Advancing</span>
+                <span className={`cv-rowline-cell text-right font-mono ${d.breadth.advancing >= declining ? 'win' : ''}`}>{d.breadth.advancing}%</span>
+              </div>
+              <div className="cv-rowline">
+                <span className="cv-rowline-label">Declining</span>
+                <span className={`cv-rowline-cell text-right font-mono ${declining > d.breadth.advancing ? 'win' : ''}`} style={declining > d.breadth.advancing ? undefined : { color: TONES.down }}>
+                  {declining}%
+                </span>
+              </div>
+              <div className="cv-rowline">
+                <span className="cv-rowline-label">Unchanged</span>
+                <span className="cv-rowline-cell text-right font-mono">{d.breadth.unchanged || 0}%</span>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="font-display text-2xl font-bold text-danger">{declining}%</p>
-              <p className="text-[11px] text-muted mt-0.5 flex items-center gap-1 justify-end"><TrendingDown size={11} /> declining</p>
-            </div>
-          </div>
-          <div className="h-2.5 rounded-full overflow-hidden flex bg-white/5 mb-3">
-            <div className="bg-gradient-to-r from-[#34d399] to-[#10b981]" style={{ width: `${d.breadth.advancing}%` }} />
-            <div className="bg-gradient-to-r from-[#ef4444] to-[#f87171]" style={{ width: `${declining}%` }} />
-          </div>
-          <p className="text-[12px] text-muted leading-relaxed">
-            {d.breadth.advancing >= 55
-              ? 'Broad participation — rallies are confirmed by the tape, not just majors.'
-              : d.breadth.advancing >= 40
-              ? 'Mixed participation — leadership is narrow; follow the movers, not the index.'
-              : 'Narrow tape — downside breadth warns against aggressive entries.'}
-          </p>
-          <div className="mt-4 pt-3 border-t border-white/5">
-            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted mb-2">Agent note</p>
-            <p className="text-[12px] text-snow/80 leading-relaxed">
-              {d.regime === 'risk-on'
-                ? 'Council and analysis agents run aggressive playbooks in this regime.'
-                : d.regime === 'risk-off'
-                ? 'Risk Desk tightens stops automatically when the regime flips risk-off.'
-                : 'Neutral regime — agents weight catalysts over momentum.'}
-            </p>
-          </div>
-        </Panel>
+            <InsightRow icon={Activity} tone={d.breadth.advancing >= declining ? 'up' : 'down'} title="Breadth interpretation" body={breadthRead} />
+          </PanelV2>
 
-        {/* movers */}
-        <Panel title="Biggest Movers" className="lg:col-span-1" delay={0.24}>
-          <div className="space-y-1.5">
-            {d.movers.map((m) => {
-              const isFocus = m.symbol === focusSymbol
-              return (
-              <Link
-                key={m.symbol}
-                to={`/dashboard/analysis?token=${m.symbol}`}
-                className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg hover:bg-white/5 transition-colors group ${
-                  isFocus ? 'bg-accent/10 ring-1 ring-accent/40' : ''
-                }`}
-              >
-                <div className="min-w-0">
-                  <p className="text-[12.5px] font-semibold text-snow flex items-center gap-1.5">
-                    {m.symbol}
-                    {isFocus && <span className="text-[8px] font-mono tracking-[0.14em] text-accent border border-accent/40 rounded px-1 py-px">FOCUS</span>}
-                  </p>
-                  <p className="text-[10px] text-faint truncate">{m.name}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[12px] text-snow/85 font-mono">{fmtUsd(m.priceUsd)}</p>
-                  <p className={`text-[11px] font-mono ${changeColor(m.change24h)}`}>{fmtPct(m.change24h)}</p>
-                </div>
-                <ArrowRight size={12} className="text-faint opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-              </Link>
-              )
-            })}
-          </div>
-        </Panel>
+          <PanelV2 icon={TrendingDown} title="Biggest Movers" right={<MicroLabel>24h change only · no intraday series published</MicroLabel>} delay={0.24}>
+            {d.movers.length === 0 ? (
+              <p className="text-[12px]" style={{ color: '#66739a' }}>No movers published in this market snapshot.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {d.movers.map((m) => {
+                  const isFocus = m.symbol === focusSymbol
+                  const up = Number(m.change24h) >= 0
+                  return (
+                    <Link
+                      key={m.symbol}
+                      to={`/dashboard/analysis?token=${m.symbol}`}
+                      className="cv-source w-full"
+                      style={isFocus ? { borderColor: `${TONES.blue}66`, background: 'rgba(110,168,255,0.10)' } : undefined}
+                    >
+                      <TokenLogo symbol={m.symbol} size={26} />
+                      <span className="min-w-0 flex-1 text-left">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-[12px] font-semibold" style={{ color: '#eaf2ff' }}>{m.symbol}</span>
+                          {isFocus && <span className="cv-chip !rounded-full !px-2 !py-0 text-[8px] tracking-[0.14em]">FOCUS</span>}
+                        </span>
+                        <span className="block truncate font-mono text-[10px]" style={{ color: '#66739a' }}>{m.name}</span>
+                      </span>
+                      <span className="text-right">
+                        <span className="block font-mono text-[12px]" style={{ color: '#dce5f8' }}>{fmtUsd(m.priceUsd)}</span>
+                        <span className={`cv-delta block ${up ? 'up' : 'down'}`}>{fmtPct(m.change24h)}</span>
+                      </span>
+                      <ArrowRight size={13} style={{ color: '#66739a' }} />
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </PanelV2>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <PanelV2 icon={Gauge} title="Fear & Greed Index" right={<MicroLabel>{d.fgLabel}</MicroLabel>} delay={0.2}>
+            <div className="flex items-center gap-5">
+              <Ring value={d.fearGreed} size={92} stroke={7} tone={d.fearGreed >= 60 ? 'up' : d.fearGreed >= 45 ? 'amber' : 'down'} label="index" sub="0–100" />
+              <div className="min-w-0">
+                <p className="text-[13px] leading-relaxed" style={{ color: '#aebfe4' }}>{fearRead}</p>
+                <p className="mt-2 text-[11px]" style={{ color: '#66739a' }}>Sentiment gauge from the live market snapshot.</p>
+              </div>
+            </div>
+          </PanelV2>
+
+          <PanelV2 icon={Globe} title="Agent Note" right={<MicroLabel>{d.regime}</MicroLabel>} delay={0.28}>
+            <InsightRow icon={Globe} tone={regimeTone} title={`${d.regime.toUpperCase()} regime posture`} body={regimeRead} />
+            <div className="mt-3">
+              <div className="cv-rowline">
+                <span className="cv-rowline-label">Snapshot</span>
+                <span className="cv-rowline-cell text-right font-mono text-[11px]">{new Date(d.asOf).toLocaleString()}</span>
+              </div>
+              <div className="cv-rowline">
+                <span className="cv-rowline-label">Data mode</span>
+                <span className="cv-rowline-cell text-right">live market data</span>
+              </div>
+            </div>
+          </PanelV2>
+        </div>
       </div>
-    </>
+    </div>
   )
 }

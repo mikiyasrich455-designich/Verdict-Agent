@@ -127,6 +127,16 @@ export async function fetchMarketOverview() {
   return res.json()
 }
 
+// GET /api/proxy/ryo/majors → real CMC quotes for the console quick-start tiles
+export async function fetchMajors() {
+  const res = await fetch('/api/proxy/ryo/majors')
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Major quotes failed')
+  }
+  return res.json()
+}
+
 // POST /api/proxy/ryo/scan_market → normalized scan array
 export async function fetchScan() {
   const res = await fetch('/api/proxy/ryo/scan_market', {

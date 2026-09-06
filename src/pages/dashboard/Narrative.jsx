@@ -1,12 +1,19 @@
 // Narrative agent — the Multi-KOL Narrative spotlight.
 // Tracks KOL voices, flags convergence, and stamps every news item
 // VERIFIED / UNVERIFIED / CONTRADICTED against on-chain evidence.
-import { Radio, RefreshCw, Newspaper, Users } from 'lucide-react'
+import {
+  Radio, RefreshCw, Newspaper, Users, TrendingUp, TrendingDown,
+  Gauge, Quote, ArrowUpRight,
+} from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
-import { PageHeader, Panel, Stat, EmptyState, StancePill, StampPill, ErrorState } from '../../components/DashUI'
-import { PageSkeleton } from '../../components/Loaders'
+import { ErrorState } from '../../components/DashUI'
+import {
+  PanelV2, StatTile, AnswerBanner, InsightRow, SourceRow,
+  MicroLabel, LivePill, TONES,
+} from '../../components/ConsoleUI'
 
 
 // Platform logos as inline SVG components
@@ -46,67 +53,136 @@ function PlatformLogo({ platform, size = 14 }) {
   return icons[platform] || icons.web
 }
 
+function TonePill({ label, tone }) {
+  const color = TONES[tone] || TONES.blue
+  return (
+    <span
+      className="rounded-full px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em]"
+      style={{ color, background: `${color}14`, border: `1px solid ${color}55`, boxShadow: `0 0 18px ${color}33` }}
+    >
+      {label}
+    </span>
+  )
+}
+
+function StampPill({ stamp }) {
+  const tone = stamp === 'VERIFIED' ? 'up' : stamp === 'CONTRADICTED' ? 'down' : 'amber'
+  const color = TONES[tone]
+  return (
+    <span
+      className="rounded-full px-2 py-0.5 font-mono text-[9px] font-bold tracking-[0.12em]"
+      style={{ color, background: `${color}14`, border: `1px solid ${color}55` }}
+    >
+      {stamp}
+    </span>
+  )
+}
+
+function stanceTone(stance) {
+  const s = String(stance || '').toLowerCase()
+  if (s.includes('bull')) return 'up'
+  if (s.includes('bear')) return 'down'
+  return 'blue'
+}
+
 function KolCard({ k, delay }) {
   const platform = k.platform || 'web'
-  
+  const tone = stanceTone(k.stance)
+  const color = TONES[tone] || TONES.blue
+  const conviction = k.conviction || 50
+
   return (
-    <div className="glass-panel !p-4" style={{ transitionDelay: `${delay}s` }}>
-      <div className="flex items-start justify-between gap-2 mb-2.5">
-        <div className="min-w-0 flex items-center gap-2">
-          <div className="text-faint" title={platform}>
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.38, delay, ease: 'easeOut' }}
+      className="flex flex-col rounded-2xl border p-4"
+      style={{ borderColor: 'rgba(126,156,255,0.14)', background: 'rgba(255,255,255,0.03)' }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full border"
+            style={{ color, borderColor: `${color}55`, background: `${color}14` }}
+            title={platform}
+          >
             <PlatformLogo platform={platform} />
-          </div>
-          <div>
-            <p className="text-[13px] font-semibold text-snow leading-none">{k.handle}</p>
-            {k.followers && (
-              <p className="text-[10px] text-faint mt-1">{k.followers} followers</p>
-            )}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[12.5px] font-semibold leading-none" style={{ color: '#f4f8ff' }}>
+              {k.handle}
+            </p>
+            <MicroLabel className="mt-1.5 block">
+              {platform}{k.followers ? ` · ${k.followers} followers` : ''}
+            </MicroLabel>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex flex-shrink-0 items-center gap-1.5">
           {k.impact && (
-            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${k.impact === 'HIGH' ? 'bg-warning/10 border-warning/30 text-warning' : 'bg-white/5 border-white/10 text-faint'}`}>
+            <span
+              className="cv-chip !rounded-md !px-1.5 !py-0.5 font-mono !text-[9px]"
+              style={k.impact === 'HIGH' ? { color: TONES.amber, borderColor: `${TONES.amber}55`, background: `${TONES.amber}14` } : undefined}
+            >
               {k.impact}
             </span>
           )}
-          <StancePill stance={k.stance} />
+          <TonePill label={String(k.stance || 'neutral')} tone={tone} />
         </div>
       </div>
 
-      <p className="text-[12px] text-snow/75 leading-relaxed">“{k.quote}”</p>
+      <InsightRow icon={Quote} tone={tone} title="The post" body={`“${k.quote}”`} />
 
-      <div className="flex items-center justify-between gap-3 mt-3 pt-2.5 border-t border-white/5">
-        <div className="flex-1">
-          <div className="flex justify-between text-[9px] font-mono text-faint mb-1">
-            <span>CONVICTION</span>
-            <span>{k.conviction || 50}</span>
-          </div>
-          <div className="h-1 rounded-full bg-white/6 overflow-hidden">
-            <div
-              className={`h-full rounded-full ${k.stance === 'bullish' ? 'bg-[#34d399]' : k.stance === 'bearish' ? 'bg-[#f87171]' : 'bg-[#94a3b8]'}`}
-              style={{ width: `${k.conviction || 50}%` }}
-            />
-          </div>
+      <div className="mt-2">
+        <div className="flex items-center justify-between">
+          <MicroLabel>Conviction</MicroLabel>
+          <span className="font-mono text-[10px]" style={{ color }}>{conviction}</span>
         </div>
-        <a
-          href={k.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] text-[#5b93ff] hover:underline whitespace-nowrap"
-        >
-          View post →
-        </a>
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+          <div className="h-full rounded-full" style={{ width: `${conviction}%`, background: color }} />
+        </div>
       </div>
-    </div>
+
+      <div className="mt-2.5">
+        <SourceRow title={`View ${k.handle}'s post`} url={k.url} tag={platform} />
+      </div>
+    </motion.div>
   )
 }
 
 function convergenceTone(status) {
   const s = String(status || '').toUpperCase()
-  if (s.includes('BULLISH')) return 'text-success'
-  if (s.includes('BEARISH')) return 'text-danger'
-  if (s === 'COMPRESSION') return 'text-faint'
-  return 'text-warning'
+  if (s.includes('BULLISH')) return 'up'
+  if (s.includes('BEARISH')) return 'down'
+  if (s === 'COMPRESSION') return 'blue'
+  return 'amber'
+}
+
+function Loading() {
+  const steps = [
+    'Searching X, YouTube & Reddit for voices',
+    'Reading each post\'s stance',
+    'Counting bullish vs bearish conviction',
+    'Stamping news against on-chain evidence',
+  ]
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="cv-panel cv-ghost h-[112px]" />
+      <div className="cv-grid-stats">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
+      </div>
+      <div className="cv-panel flex flex-col items-center px-6 py-9">
+        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
+          <span className="font-mono text-sm">sweeping the loudest voices…</span>
+        </div>
+        <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
+          {steps.map((s) => (
+            <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Narrative() {
@@ -119,76 +195,106 @@ export default function Narrative() {
 
   if (!token) {
     return (
-      <>
-        <PageHeader icon={Radio} title="KOL Radar" subtitle="The Multi-KOL Narrative spotlight — what the loudest voices are really saying." source={{ mode: 'live', name: 'narrative agent' }} />
-        <EmptyState
-          icon={Radio}
-          title="Set a token first"
-          hint="Enter a token on the Your Token page or use the search bar above to begin."
-          action={<a href="/dashboard" className="glass-btn">Go to Your Token</a>}
-        />
-      </>
+      <div className="cv-panel flex flex-col items-center px-6 py-14 text-center">
+        <Radio size={22} className="mb-3" style={{ color: '#66739a' }} />
+        <h3 className="text-[15px] font-semibold" style={{ color: '#eef3ff' }}>Set a token first</h3>
+        <p className="mt-1.5 max-w-sm text-[13px]" style={{ color: '#8b98bd' }}>
+          Enter a token on the Your Token page or use the search bar above to begin.
+        </p>
+        <a href="/dashboard" className="cv-chip mt-4">Go to Your Token</a>
+      </div>
     )
   }
 
   if (status === 'error') {
-    return (
-      <>
-        <PageHeader icon={Radio} title="KOL Radar" subtitle="The Multi-KOL Narrative spotlight — what the loudest voices are really saying." source={{ mode: 'live', name: 'narrative agent' }} />
-        <ErrorState error={agentError} onRetry={() => rerun()} />
-      </>
-    )
+    return <ErrorState error={agentError} onRetry={() => rerun()} />
   }
 
-  if (status !== 'ready' || !data) {
-    return (
-      <>
-        <PageHeader icon={Radio} title="KOL Radar" subtitle="The Multi-KOL Narrative spotlight — what the loudest voices are really saying." source={{ mode: 'live', name: 'narrative agent' }} />
-        <PageSkeleton />
-      </>
-    )
-  }
+  if (status !== 'ready' || !data) return <Loading />
 
   const d = data
+  const voices = d.voices_tracked ?? d.total ?? 0
+  const bull = d.bullish_voices ?? d.bullish ?? 0
+  const bear = d.bearish_voices ?? 0
+  const convergence = d.convergence_status || 'COMPRESSION'
+  const convTone = convergenceTone(convergence)
+  // Confidence is derived only from the real voice counts — no invented numbers.
+  const conf = bull + bear > 0 ? Math.round((Math.max(bull, bear) / (bull + bear)) * 100) : null
 
   return (
-    <>
-      <PageHeader
-        icon={Radio}
-        title={`KOL Radar · ${d.symbol}`}
-        subtitle="The Multi-KOL Narrative spotlight — what the loudest voices are really saying."
-        source={{ mode: 'live', name: 'narrative agent' }}
+    <div className="flex flex-col gap-4">
+      {/* ── identity: the sweep is done ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: 'easeOut' }}
+        className="cv-panel flex flex-wrap items-center justify-between gap-4 p-5"
       >
-        <button onClick={rerun} className="glass-chip"><RefreshCw size={12} /> Re-sweep</button>
-      </PageHeader>
+        <div className="flex min-w-0 items-center gap-3.5">
+          <span
+            className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl border"
+            style={{ color: TONES.violet, borderColor: `${TONES.violet}44`, background: `${TONES.violet}14` }}
+          >
+            <Radio size={19} strokeWidth={2.1} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight" style={{ color: '#f4f8ff' }}>
+                KOL Radar · {d.symbol}
+              </h1>
+              <LivePill label="Sweep complete" />
+            </div>
+            <p className="mt-1 text-[12.5px]" style={{ color: '#aebfe4' }}>
+              The Multi-KOL Narrative spotlight — what the loudest voices are really saying.
+            </p>
+          </div>
+        </div>
+        <button onClick={rerun} className="cv-chip">
+          <RefreshCw size={12} /> Re-sweep
+        </button>
+      </motion.div>
 
-      {/* headline stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Stat label="Voices Tracked" value={d.voices_tracked ?? d.total ?? 0} sub="unique accounts in sweep" delay={0.02} />
-        <Stat label="Bullish" value={d.bullish_voices ?? d.bullish ?? 0} sub="macro upward conviction" tone="text-success" delay={0.06} />
-        <Stat label="Bearish" value={d.bearish_voices ?? 0} sub="fear / doubt / distribution" tone="text-danger" delay={0.1} />
-        <Stat
+      {/* ── the answer, first ── */}
+      <AnswerBanner
+        icon={Radio}
+        kicker={`KOL Radar · ${d.symbol}`}
+        answer={d.narrative_headline}
+        stance={<TonePill label={convergence} tone={convTone} />}
+        confidence={conf}
+        confidenceTone={convTone}
+        chips={[
+          `${voices} voices tracked`,
+          `${bull} bullish`,
+          `${bear} bearish`,
+        ]}
+      />
+
+      {/* ── headline stats ── */}
+      <div className="cv-grid-stats">
+        <StatTile icon={Users} label="Voices Tracked" value={voices} foot="unique accounts in sweep" delay={0.02} />
+        <StatTile icon={TrendingUp} label="Bullish" value={bull} foot="macro upward conviction" delay={0.06} />
+        <StatTile icon={TrendingDown} label="Bearish" value={bear} foot="fear / doubt / distribution" delay={0.1} />
+        <StatTile
+          icon={Gauge}
           label="Convergence"
-          value={<span className={convergenceTone(d.convergence_status)}>{d.convergence_status || 'COMPRESSION'}</span>}
-          sub="narrative consensus"
+          value={<span style={{ color: TONES[convTone], fontSize: 15 }}>{convergence}</span>}
+          foot="narrative consensus"
           delay={0.14}
         />
       </div>
 
-      {/* sovereign narrative banner */}
-      <div className="glass-panel !p-4 mb-4 border-accent/20">
-        <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Narrative headline</p>
-        <p className="text-[14px] text-snow/90 font-semibold leading-snug break-words">{d.narrative_headline}</p>
-        <p className="text-[12px] text-snow/70 leading-relaxed mt-2 break-words">{d.sentiment_summary_text}</p>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* KOL grid */}
-        <div className="lg:col-span-2">
-          <Panel title={`Voices · ${d.total}`} icon={Users} delay={0.16}>
-            <div className="grid sm:grid-cols-2 gap-3">
+      <div className="cv-grid-2">
+        {/* ── every real post as its own card ── */}
+        <div className="min-w-0">
+          <PanelV2
+            icon={Users}
+            title={`Voices · ${d.total}`}
+            right={<MicroLabel>{d.kols.length} posts</MicroLabel>}
+            delay={0.16}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
               {d.kols.length === 0 && (
-                <p className="text-[12px] text-faint col-span-full py-4 text-center">
+                <p className="col-span-full py-4 text-center text-[12px]" style={{ color: '#66739a' }}>
                   No recent KOL posts found for {d.symbol} — try re-sweeping.
                 </p>
               )}
@@ -196,42 +302,52 @@ export default function Narrative() {
                 <KolCard key={`${k.handle}-${i}`} k={k} delay={i * 0.04} />
               ))}
             </div>
-          </Panel>
+          </PanelV2>
         </div>
 
-        {/* news column */}
-        <div className="space-y-4">
-          <Panel title="News Checker" icon={Newspaper} delay={0.2}>
-            <div className="space-y-2.5">
+        {/* ── narrative read + news column ── */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <PanelV2 icon={Radio} title="Narrative Read" delay={0.2}>
+            <InsightRow icon={Quote} tone={convTone} title={convergence} body={d.sentiment_summary_text} />
+          </PanelV2>
+
+          <PanelV2
+            icon={Newspaper}
+            title="News Checker"
+            right={<MicroLabel>{d.news.length} items</MicroLabel>}
+            delay={0.24}
+          >
+            <div className="flex flex-col gap-2.5">
               {d.news.map((n, i) => (
-                <a
-                  key={i}
-                  href={n.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block px-3 py-2.5 rounded-xl bg-white/3 border border-white/5 hover:bg-white/5 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <p className="text-[12px] text-snow/90 leading-snug flex-1">{n.title}</p>
+                <div key={i} className="flex flex-col gap-1.5">
+                  <SourceRow title={n.title} url={n.url} tag={n.source || 'news'} />
+                  <div className="flex flex-wrap items-center gap-2 px-1">
                     {n.stamp && <StampPill stamp={n.stamp} />}
+                    <span className="font-mono text-[9.5px]" style={{ color: '#66739a' }}>
+                      {[n.source, n.author, n.age || 'recent'].filter(Boolean).join(' · ')}
+                    </span>
                   </div>
-                  <p className="text-[9.5px] font-mono text-faint">{n.source} · {n.age || 'recent'}</p>
-                </a>
+                </div>
               ))}
+              {d.news.length === 0 && (
+                <p className="text-[12px]" style={{ color: '#66739a' }}>
+                  No recent news surfaced in this sweep.
+                </p>
+              )}
             </div>
-            <p className="text-[10.5px] text-faint leading-relaxed mt-3">
+            <p className="mt-3 text-[10.5px] leading-relaxed" style={{ color: '#66739a' }}>
               Every headline is stamped against on-chain evidence before it can influence a verdict.
             </p>
-          </Panel>
+          </PanelV2>
 
-          <Panel title="Handoff" delay={0.24}>
-            <div className="space-y-2">
-              <Link to={`/dashboard/council?token=${d.symbol}`} className="glass-chip w-full justify-center">Send to the Council</Link>
-              <Link to={`/dashboard/deep?token=${d.symbol}`} className="glass-chip w-full justify-center">Run Deep Analysis</Link>
+          <PanelV2 icon={ArrowUpRight} title="Handoff" delay={0.28}>
+            <div className="flex flex-wrap gap-2">
+              <Link to={`/dashboard/council?token=${d.symbol}`} className="cv-chip">Send to the Council</Link>
+              <Link to={`/dashboard/deep?token=${d.symbol}`} className="cv-chip">Run Deep Analysis</Link>
             </div>
-          </Panel>
+          </PanelV2>
         </div>
       </div>
-    </>
+    </div>
   )
 }
