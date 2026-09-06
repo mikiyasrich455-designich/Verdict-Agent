@@ -17,6 +17,7 @@ import {
   withLiveIdentity,
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
+import { grokLiveInsights } from './synthesis.js'
 import { resolveCaInBody, resolveCaInList } from '../lib/caGuard.js'
 import { shortAddr } from '../lib/tokenResolver.js'
 
@@ -151,6 +152,23 @@ router.post('/analyze_token', async (req, res) => {
       error(`analyze_token(${live.ca ? shortAddr(live.ca) : symbol}) AI layer`, ryoErr)
       data = profileFromLive(live)
     }
+
+    // Upgrade the qualitative layer with SERP + Grok research grounded in the
+    // live contract data — every CA gets real AI analysis, never templates.
+    if (live && data?.qualitative === 'derived') {
+      try {
+        const insights = await grokLiveInsights(live)
+        if (insights) {
+          data.catalysts = insights.catalysts
+          data.risks = insights.risks
+          data.sentiment = insights.sentiment
+          data.qualitative = 'researched'
+        }
+      } catch (insightErr) {
+        error('analyze_token research upgrade', insightErr)
+      }
+    }
+
     setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/analyze_token', 200, Date.now() - start)
     res.json(data)

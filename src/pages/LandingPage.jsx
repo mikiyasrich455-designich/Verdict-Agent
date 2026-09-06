@@ -245,7 +245,7 @@ function RegistryDiagram() {
                   <Icon size={14} className="text-accent flex-shrink-0" />
                   <div>
                     <div className="text-xs font-semibold text-snow font-mono">{label}</div>
-                    <div className="text-[10px] font-mono text-faint">ryo.{label.split('_')[0]} · v1</div>
+                    <div className="text-[10px] font-mono text-faint">verdict.{label.split('_')[0]} · v1</div>
                   </div>
                 </div>
               ))}

@@ -294,6 +294,74 @@ function pickPillar(nested, flatScore, flatReason, fallbackReason) {
   return { score: clampScore(score), reasoning: String(reasoning) }
 }
 
+// ── Shared formatting / SERP helpers ─────────────────────────────
+function moneyShort(v) {
+  const n = Number(v) || 0
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`
+  return `$${n.toFixed(2)}`
+}
+
+const cleanName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+function serpList(r) {
+  const organic = r?.organic || r?.data?.organic
+  return Array.isArray(organic) ? organic : []
+}
+
+// ── Live qualitative insights: SERP + Grok grounded in live numbers ──
+export async function grokLiveInsights(live) {
+  const sym = String(live?.symbol || '').toUpperCase()
+  const name = live?.name || sym
+
+  const serp = await callAceSerp(`${name} ${sym} crypto token news analysis`, 6).catch((e) => {
+    console.log('[INSIGHTS] SERP failed:', e.message)
+    return null
+  })
+  const newsText = serpList(serp)
+    .slice(0, 6)
+    .map((r) => `- ${r.title || ''}: ${r.snippet || ''}`)
+    .join('\n')
+
+  const prompt = `You are a crypto research analyst. Ground every sentence in the live market data and web research below. Never name data providers, APIs or models.
+
+TOKEN: ${name} (${sym})${live?.ca ? ` — contract ${live.ca} on ${live.chainLabel || live.chain || 'chain'}` : ''}
+LIVE MARKET DATA: price $${Number(live?.priceUsd || 0)} · 24h ${Number(live?.change24h || 0).toFixed(2)}% · cap ${moneyShort(live?.marketCap)} · volume ${moneyShort(live?.volume24h)} · liquidity ${moneyShort(live?.liquidityUsd)} · 24h tape ${live?.buys24h || 0} buys / ${live?.sells24h || 0} sells · pool age ${Number(live?.pairAgeDays || 0).toFixed(0)} days
+
+WEB RESEARCH:
+${newsText || 'No search results available — reason from the live market data alone.'}
+
+Respond with ONLY a valid JSON object:
+{
+  "catalysts": [ {"t": "<one specific catalyst sentence>", "eta": "today|ongoing|<month>", "impact": "high|medium|low"} ],
+  "risks": [ {"t": "<one specific risk sentence>", "sev": "critical|high|medium|low"} ],
+  "sentiment": { "bull": <0-100>, "bear": <0-100>, "neutral": <0-100> }
+}
+3-5 catalysts and 3-5 risks, each a concrete sentence citing a number or headline.`
+
+  const text = await callAceChat([
+    { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
+    { role: 'user', content: prompt },
+  ], 'grok-4', 2000)
+
+  const parsed = extractJson(text)
+  if (!parsed) return null
+  const catalysts = (Array.isArray(parsed.catalysts) ? parsed.catalysts : [])
+    .filter((c) => c && typeof c.t === 'string' && c.t.trim())
+    .slice(0, 5)
+    .map((c) => ({ t: c.t.trim(), eta: String(c.eta || 'ongoing'), impact: String(c.impact || 'medium') }))
+  const risks = (Array.isArray(parsed.risks) ? parsed.risks : [])
+    .filter((r) => r && typeof r.t === 'string' && r.t.trim())
+    .slice(0, 5)
+    .map((r) => ({ t: r.t.trim(), sev: String(r.sev || 'medium') }))
+  if (!catalysts.length || !risks.length) return null
+  const s = parsed.sentiment || {}
+  const bull = clampScore(firstNum(s.bull))
+  const bear = clampScore(firstNum(s.bear))
+  return { catalysts, risks, sentiment: { bull, bear, neutral: Math.max(0, 100 - bull - bear) } }
+}
+
 // ── Generate detailed script from deep research ──────────────────
 async function generateDetailedScript(symbol, verdictData) {
   const symbolUpper = symbol.toUpperCase()
@@ -427,6 +495,197 @@ router.post('/debate', async (req, res) => {
     res.json(data)
   } catch (err) {
     error('debate', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Council: evidence-grounded adversarial analysis ──────────────
+function councilKey(req, prefix) {
+  const live = req.tokenIdentity || null
+  const sym = String(req.body?.symbol || '').toUpperCase()
+  const id = live?.ca || (live?.chain ? `${live.chain}:${sym}` : sym)
+  return `${prefix}:${id.toLowerCase()}`
+}
+
+const BULL_ROLE = `You are the BULL advocate on a professional crypto trading desk. Your only job is to build the strongest evidence-based case for commitment (long exposure) in the token under review. Argue strictly from the evidence pack provided: cite prices, volume, liquidity, tape flow, pool age, catalysts and headlines. Surface upside the others miss and treat risks as priced-in or manageable only when the evidence supports it. Never name data providers, APIs or models. Plain text only, no markdown.`
+
+const BEAR_ROLE = `You are the BEAR advocate on a professional crypto trading desk. Your only job is to build the strongest evidence-based case for caution (reducing or avoiding exposure) in the token under review. Argue strictly from the evidence pack provided: cite liquidity depth, sell pressure, wallet concentration, valuation, pool age and risk headlines. Stress-test bullish claims and expose what the bulls ignore. Never name data providers, APIs or models. Plain text only, no markdown.`
+
+const JUDGE_ROLE = `You are the neutral JUDGE of a crypto trading desk council. You never take sides in advance. You weigh the bull and bear arguments strictly against the evidence pack: claims grounded in specific numbers outrank rhetoric. You score each advocate 0-100 for evidentiary grounding and issue one ruling (BUY, HOLD or AVOID) with a confidence score. Never name data providers, APIs or models.`
+
+async function buildEvidencePack(symbol, live) {
+  const sym = String(symbol || '').toUpperCase()
+  const name = live?.name || sym
+
+  const [ryoRes, newsRes, riskRes] = await Promise.allSettled([
+    callRyoTool('analyze_token', { symbol: sym }),
+    callAceSerp(`${name} ${sym} crypto token latest news price`, 6),
+    callAceSerp(`${name} ${sym} crypto token risk liquidity concerns`, 6),
+  ])
+
+  const lines = []
+  lines.push(`TOKEN: ${name} (${sym})${live?.ca ? ` — contract ${live.ca} on ${live.chainLabel || live.chain || 'chain'}` : ''}`)
+
+  if (live) {
+    lines.push('')
+    lines.push('LIVE MARKET DATA:')
+    lines.push(`- Price: $${Number(live.priceUsd || 0)}`)
+    lines.push(`- 24h change: ${Number(live.change24h || 0).toFixed(2)}%`)
+    lines.push(`- Market cap: ${moneyShort(live.marketCap)} · FDV: ${moneyShort(live.fdv)}`)
+    lines.push(`- 24h volume: ${moneyShort(live.volume24h)} · Liquidity: ${moneyShort(live.liquidityUsd)}`)
+    lines.push(`- 24h tape: ${live.buys24h || 0} buys / ${live.sells24h || 0} sells (${live.uniqueBuyers24h || 0} buyers / ${live.uniqueSellers24h || 0} wallets)`)
+    lines.push(`- Pool age: ${Number(live.pairAgeDays || 0).toFixed(0)} days`)
+    if (Number.isFinite(Number(live.athChangePct))) lines.push(`- Distance from ATH: ${Number(live.athChangePct).toFixed(1)}%`)
+  }
+
+  if (ryoRes.status === 'fulfilled') {
+    const u = unwrapRyo(ryoRes.value) || {}
+    const ryoTrusted = !live?.ca || (cleanName(u.symbol) === cleanName(sym) && (!u.name || cleanName(u.name) === cleanName(name)))
+    if (ryoTrusted) {
+      const desc = typeof u.description === 'string' ? u.description.slice(0, 400) : ''
+      const cats = Array.isArray(u.categories) ? u.categories.join(', ') : ''
+      if (desc || cats) {
+        lines.push('')
+        lines.push('RESEARCH DESK LAYER:')
+        if (desc) lines.push(`- About: ${desc}`)
+        if (cats) lines.push(`- Categories: ${cats}`)
+      }
+    }
+  }
+
+  const news = newsRes.status === 'fulfilled' ? serpList(newsRes.value).slice(0, 6) : []
+  const risk = riskRes.status === 'fulfilled' ? serpList(riskRes.value).slice(0, 6) : []
+  if (news.length || risk.length) {
+    lines.push('')
+    lines.push('WEB INTELLIGENCE:')
+    news.forEach((r) => lines.push(`- [news] ${r.title || ''} — ${r.snippet || ''}`))
+    risk.forEach((r) => lines.push(`- [risk] ${r.title || ''} — ${r.snippet || ''}`))
+  }
+
+  return lines.join('\n')
+}
+
+async function runCouncil(symbol, live) {
+  const sym = String(symbol || '').toUpperCase()
+  const name = live?.name || sym
+  const evidence = await buildEvidencePack(symbol, live)
+
+  // Round 1 — independent opening cases (parallel)
+  const [bullOpenRes, bearOpenRes] = await Promise.all([
+    callAceChat([
+      { role: 'system', content: BULL_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 120-180 words. Cite specific numbers from the pack.` },
+    ], 'grok-4', 1400).catch(() => ''),
+    callAceChat([
+      { role: 'system', content: BEAR_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 120-180 words. Cite specific numbers from the pack.` },
+    ], 'grok-4', 1400).catch(() => ''),
+  ])
+  const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
+  const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
+
+  // Round 2 — cross-examination (parallel, each reads the other's opening)
+  const [bullRebutRes, bearRebutRes] = await Promise.all([
+    callAceChat([
+      { role: 'system', content: BULL_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
+    ], 'grok-4', 1200).catch(() => ''),
+    callAceChat([
+      { role: 'system', content: BEAR_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
+    ], 'grok-4', 1200).catch(() => ''),
+  ])
+  const bullRebut = String(bullRebutRes || '').trim() || bullOpen
+  const bearRebut = String(bearRebutRes || '').trim() || bearOpen
+
+  // Round 3 — judge rules over the full transcript
+  const judgePrompt = `FULL TRANSCRIPT:
+BULL OPENING: ${bullOpen}
+BEAR OPENING: ${bearOpen}
+BULL CROSS-EXAMINATION: ${bullRebut}
+BEAR CROSS-EXAMINATION: ${bearRebut}
+
+EVIDENCE PACK:
+${evidence}
+
+Score how well each side grounded its claims in the evidence (0-100 each), then rule. Respond with ONLY a valid JSON object:
+{"bullScore": <0-100>, "bearScore": <0-100>, "verdict": "BUY"|"HOLD"|"AVOID", "confidence": <0-100>, "text": "<3-5 sentence ruling citing the decisive evidence. Never name data providers, APIs or models.>"}`
+
+  let judge = extractJson(await callAceChat([
+    { role: 'system', content: JUDGE_ROLE },
+    { role: 'user', content: judgePrompt },
+  ], 'grok-4', 1600).catch(() => ''))
+  if (!judge) {
+    judge = extractJson(await callAceChat([
+      { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
+      { role: 'user', content: judgePrompt },
+    ], 'grok-4', 1600).catch(() => ''))
+  }
+
+  const bull100 = clampScore(firstNum(judge?.bullScore))
+  const bear100 = clampScore(firstNum(judge?.bearScore))
+  const bull01 = +(bull100 / 100).toFixed(2)
+  const bear01 = +(bear100 / 100).toFixed(2)
+  const diff = +(bull01 - bear01).toFixed(2)
+  const threshold = 0.15
+  let verdict = String(judge?.verdict || '').toUpperCase()
+  if (!['BUY', 'HOLD', 'AVOID'].includes(verdict)) {
+    verdict = diff > threshold ? 'BUY' : diff < -threshold ? 'AVOID' : 'HOLD'
+  }
+  const confidence = clampScore(firstNum(judge?.confidence, 50 + Math.abs(diff) * 100))
+  const judgeText = String(judge?.text || '').trim() ||
+    `The council weighed both sides on the live evidence. The bull scored ${bull100} and the bear ${bear100}. The ruling is ${verdict}.`
+
+  return {
+    symbol: sym,
+    name,
+    messages: [
+      { role: 'bull', text: bullOpen },
+      { role: 'bear', text: bearOpen },
+      { role: 'bull', text: bullRebut },
+      { role: 'bear', text: bearRebut },
+    ],
+    judge: { bullScore: bull01, bearScore: bear01, diff, threshold, verdict, confidence, text: judgeText },
+    verdictData: {
+      symbol: sym,
+      name,
+      verdict,
+      confidence,
+      priceUsd: live?.priceUsd ?? null,
+      change24h: live?.change24h ?? null,
+      asOf: new Date().toISOString(),
+    },
+  }
+}
+
+// POST /api/proxy/synthesis/council → Evidence-grounded Bull vs Bear vs Judge
+router.post('/council', async (req, res) => {
+  const start = Date.now()
+  const { symbol } = req.body
+  if (!symbol) return res.status(400).json({ error: 'symbol required' })
+
+  const limit = rateLimit('synthesis', 30, 60000)
+  if (!limit.allowed) {
+    log('POST', '/synthesis/council', 429, Date.now() - start)
+    return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
+  }
+
+  try {
+    const cacheKey = councilKey(req, 'synthesis:council')
+    const cached = getCache(cacheKey)
+    if (cached) {
+      log('POST', '/synthesis/council', 200, Date.now() - start, '(cached)')
+      return res.json(cached)
+    }
+
+    const live = req.tokenIdentity || null
+    console.log('[COUNCIL] Running adversarial council for:', symbol, live?.ca || '')
+    const data = await runCouncil(symbol, live)
+    setCache(cacheKey, data, 10 * 60 * 1000)
+    log('POST', '/synthesis/council', 200, Date.now() - start)
+    res.json(data)
+  } catch (err) {
+    error('council', err)
     res.status(500).json({ error: err.message })
   }
 })
@@ -585,5 +844,7 @@ Write the complete script now. No placeholders, no [pause]. Just the spoken text
     res.status(500).json({ error: err.message, stack: err.stack })
   }
 })
+
+export { callAceChat, callAceSerp, extractJson }
 
 export default router

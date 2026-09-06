@@ -18,7 +18,7 @@ export default function VideoStudio() {
 }
 
 function VideoStudioInner({ token, pick }) {
-  const { status, data: script } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
+  const { status, data: script, error: fetchError } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
   const history = useStudioHistory('video')
   const [phase, setPhase] = useState('idle') // idle | generating | done
   const [error, setError] = useState(null)
@@ -65,7 +65,7 @@ function VideoStudioInner({ token, pick }) {
     setOutput(null)
     setStage('Starting render…')
     try {
-      const res = await generateStudioVideo(script.symbol, script.verdict, (msg) => setStage(msg))
+      const res = await generateStudioVideo(script, setStage)
       const entry = {
         symbol: script.symbol,
         verdict: script.verdict,
@@ -112,9 +112,8 @@ function VideoStudioInner({ token, pick }) {
               <p className="text-[12.5px] text-muted break-words">{script.tone}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="glass-chip"><Film size={11} /> {script.duration} narration</span>
-              <span className="glass-chip">12s clip · 720p</span>
-              <span className="glass-chip">16:9 · WITH AUDIO</span>
+              <span className="glass-chip"><Film size={11} /> {script.duration}s narration</span>
+              <span className="glass-chip">720p · 16:9</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
@@ -167,7 +166,6 @@ function VideoStudioInner({ token, pick }) {
               <span className="glass-chip">{output.duration}s</span>
               <span className="glass-chip">{output.resolution}</span>
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
-              <span className="ml-auto font-mono text-[10px] text-faint">POWERED BY SEEDANCE · ACEDATA</span>
             </motion.div>
           )}
         </div>

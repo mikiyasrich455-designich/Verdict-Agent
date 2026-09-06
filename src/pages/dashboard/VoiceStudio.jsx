@@ -19,9 +19,10 @@ export default function VoiceStudio() {
 }
 
 function VoiceStudioInner({ token, pick }) {
-  const { status, data: script } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
+  const { status, data: script, error: fetchError } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
   const history = useStudioHistory('voice')
   const [phase, setPhase] = useState('idle') // idle | generating | done
+  const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
   const [output, setOutput] = useState(null)
   const [speaking, setSpeaking] = useState(false)
@@ -52,7 +53,7 @@ function VoiceStudioInner({ token, pick }) {
     return (
       <>
         <PageHeader icon={Mic} title="Studio · Voice" subtitle="Turn a verdict into spoken narration." source={{ mode: 'live', name: 'TTS voice' }} />
-        <ErrorState error={data} onRetry={() => window.location.reload()}>
+        <ErrorState error={fetchError} onRetry={() => window.location.reload()}>
           <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
         </ErrorState>
       </>
@@ -65,6 +66,7 @@ function VoiceStudioInner({ token, pick }) {
     setPhase('generating')
     setProgress(0)
     setOutput(null)
+    setError(null)
     try {
       const res = await generateStudioVoice(script, { onProgress: setProgress })
       const entry = {
@@ -173,10 +175,17 @@ function VoiceStudioInner({ token, pick }) {
                   <p className="text-[12.5px] text-muted max-w-md italic">“{output.script}”</p>
                 </motion.div>
               )}
-              {phase === 'idle' && (
+              {phase === 'idle' && !error && (
                 <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6">
                   <div className="empty-icon mx-auto mb-4"><Mic size={22} /></div>
                   <p className="text-[13px] text-muted">The booth is silent. Generate to give the verdict a voice.</p>
+                </motion.div>
+              )}
+              {error && (
+                <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
+                  <div className="empty-icon mx-auto mb-4"><Mic size={22} className="text-danger" /></div>
+                  <p className="text-[13px] text-danger mb-3">{error}</p>
+                  <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
                 </motion.div>
               )}
             </AnimatePresence>

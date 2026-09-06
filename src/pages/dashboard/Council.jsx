@@ -34,7 +34,7 @@ export default function Council() {
     setSaved(false)
     setPhase('collecting')
 
-    fetchDebate(token)
+    fetchCouncil(token)
       .then((d) => {
         if (!alive) return
         setData(d)

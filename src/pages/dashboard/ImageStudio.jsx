@@ -18,7 +18,7 @@ export default function ImageStudio() {
 }
 
 function ImageStudioInner({ token, pick }) {
-  const { status, data: script } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
+  const { status, data: script, error: fetchError } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
   const history = useStudioHistory('image')
   const [phase, setPhase] = useState('idle') // idle | generating | done
   const [error, setError] = useState(null)
@@ -42,7 +42,7 @@ function ImageStudioInner({ token, pick }) {
     return (
       <>
         <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
-        <ErrorState error={data} onRetry={() => window.location.reload()}>
+        <ErrorState error={fetchError} onRetry={() => window.location.reload()}>
           <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
         </ErrorState>
       </>
@@ -63,7 +63,7 @@ function ImageStudioInner({ token, pick }) {
     setError(null)
     setOutput(null)
     try {
-      const res = await generateStudioImage(script.symbol, script.verdict)
+      const res = await generateStudioImage(script)
       const entry = { symbol: script.symbol, verdict: script.verdict, url: res.url, format: res.format }
       setOutput(entry)
       history.push(entry)
@@ -152,7 +152,6 @@ function ImageStudioInner({ token, pick }) {
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 mt-3">
               <DownloadBtn onClick={() => download(output)} label={`Download .${output.format}`} />
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
-              <span className="ml-auto font-mono text-[10px] text-faint">POWERED BY SEEDREAM · ACEDATA</span>
             </motion.div>
           )}
         </div>

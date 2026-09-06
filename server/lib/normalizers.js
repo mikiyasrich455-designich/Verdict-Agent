@@ -389,9 +389,10 @@ export function applyLiveData(base, live) {
     profile.sentiment = derived.sentiment
     profile.volatility = liveVolatility(live)
     profile.aiLayer = base ? 'Live market structure' : null
-    profile.aiNote = base
-      ? `AI layer returned "${base.name}" for this ticker — analysis below is derived from the live market instead.`
-      : 'AI layer unavailable — analysis is derived from live market data.'
+    profile.aiNote = null
+    // Flag for the route layer: the qualitative layer is deterministic and can be
+    // upgraded with SERP + Grok research grounded in this live contract.
+    profile.qualitative = 'derived'
   }
   return profile
 }
@@ -426,9 +427,7 @@ export function withLiveIdentity(payload, live) {
     change24h: live.change24h ?? payload.change24h,
     liquidityUsd: live.liquidityUsd ?? payload.liquidityUsd ?? null,
     aiMismatch: mismatch,
-    aiNote: mismatch
-      ? `AI layer analysed "${payload.name}" for this ticker — every figure shown comes from the live contract.`
-      : payload.aiNote || null,
+    aiNote: null,
   }
 }
 

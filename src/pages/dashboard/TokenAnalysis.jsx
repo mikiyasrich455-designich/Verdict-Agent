@@ -159,21 +159,76 @@ function PriceChart({ history, change }) {
   )
 }
 
-// The route a lookup took stays internal — the UI says what was matched, not who
-// answered it.
-const MATCH_LABEL = {
-  contract: 'contract address',
-  contract_dexscreener: 'contract address',
-  contract_geckoterminal: 'contract address',
-  contract_pumpfun: 'contract address',
-  ticker: 'ticker symbol',
-  ticker_unverified: 'ticker symbol · unverified',
-  name: 'token name',
-  search: 'live search',
+// Live payloads vary by source — coerce every field the UI reads so a
+// malformed response can never crash the screen.
+const str = (v) => (typeof v === 'string' && v ? v : null)
+const num = (v) => {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
 }
-const matchLabel = (m) => MATCH_LABEL[m] || (m ? 'live market data' : '—')
-const LAYER_LABEL = { RYO: 'AI reasoning', 'Live market structure': 'Live market data' }
-const layerLabel = (v) => (v ? LAYER_LABEL[v] || 'live market data' : '—')
+const arr = (v) => (Array.isArray(v) ? v : [])
+function sanitizeProfile(d) {
+  if (!d || typeof d !== 'object') d = {}
+  const sentiment = d.sentiment && typeof d.sentiment === 'object' ? d.sentiment : {}
+  return {
+    ...d,
+    name: str(d.name) || str(d.symbol) || 'Unknown token',
+    symbol: str(d.symbol) || '???',
+    chain: str(d.chain),
+    chainLabel: str(d.chainLabel),
+    ca: str(d.ca) || str(d.contractAddress),
+    pairAddress: str(d.pairAddress || d.poolAddress),
+    logo: str(d.logo),
+    banner: str(d.banner),
+    description: str(d.description),
+    website: str(d.website),
+    twitter: str(d.twitter),
+    telegram: str(d.telegram),
+    github: str(d.github),
+    whitepaper: str(d.whitepaper),
+    dexUrl: str(d.dexUrl),
+    explorer: str(d.explorer),
+    cgUrl: str(d.cgUrl),
+    chartSource: str(d.chartSource),
+    priceUsd: num(d.priceUsd),
+    change1h: num(d.change1h),
+    change6h: num(d.change6h),
+    change24h: num(d.change24h),
+    marketCap: num(d.marketCap),
+    fdv: num(d.fdv),
+    volume24h: num(d.volume24h),
+    liquidityUsd: num(d.liquidityUsd),
+    poolLiquidityUsd: num(d.poolLiquidityUsd),
+    totalReserveUsd: num(d.totalReserveUsd),
+    pairAgeDays: num(d.pairAgeDays),
+    circulatingSupply: num(d.circulatingSupply),
+    totalSupply: num(d.totalSupply),
+    marketCapFdvRatio: num(d.marketCapFdvRatio),
+    cgRank: num(d.cgRank),
+    watchers: num(d.watchers),
+    ath: num(d.ath),
+    atl: num(d.atl),
+    athChangePct: num(d.athChangePct),
+    buys24h: num(d.buys24h),
+    sells24h: num(d.sells24h),
+    uniqueBuyers24h: num(d.uniqueBuyers24h),
+    uniqueSellers24h: num(d.uniqueSellers24h),
+    decimals: num(d.decimals),
+    categories: arr(d.categories).filter((c) => typeof c === 'string'),
+    socials: arr(d.socials),
+    websites: arr(d.websites),
+    candidates: arr(d.candidates),
+    priceHistory: arr(d.priceHistory),
+    catalysts: arr(d.catalysts),
+    risks: arr(d.risks),
+    sentiment: {
+      bull: num(sentiment.bull) || 0,
+      bear: num(sentiment.bear) || 0,
+      neutral: num(sentiment.neutral) || 0,
+    },
+    isCA: Boolean(d.isCA),
+  }
+}
 
 function Loading() {
   const steps = ['Reading the contract', 'Matching the network', 'Pulling price, cap & volume', 'Collecting logo, links & description']
@@ -195,8 +250,8 @@ function Loading() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-        {Array.from({ length: 6 }).map((_, i) => (
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="glass-panel !p-4">
             <div className="h-2.5 w-16 rounded bg-white/[0.05] animate-pulse" />
             <div className="h-6 w-20 rounded bg-white/[0.07] animate-pulse mt-2.5" />
@@ -229,7 +284,7 @@ export default function TokenAnalysis() {
   const [view, setView] = useState('catalysts')
 
   const identity = ca ? { symbol: token, ca, chain } : null
-  const { status, data } = useAgentData(
+  const { status, data, error } = useAgentData(
     () => (token ? fetchTokenProfile(token, identity) : null),
     [token, ca, chain, runKey]
   )
@@ -249,7 +304,7 @@ export default function TokenAnalysis() {
 
   if (status === 'error') {
     return (
-      <ErrorState error={data} onRetry={rerun}>
+      <ErrorState error={error} onRetry={rerun}>
         <p className="text-[11.5px] text-faint font-mono">
           {ca ? `contract ${ca}` : `query ${token}`} — no live market answered
         </p>
@@ -259,22 +314,7 @@ export default function TokenAnalysis() {
 
   if (status !== 'ready' || !data) return <Loading />
 
-  let p
-  try {
-    p = data
-    // Force a synchronous read to surface any shape issues early
-    void p.marketCap
-    void p.volume24h
-  } catch (err) {
-    console.error('[TOKEN-ANALYSIS] Data shape error:', err)
-    return (
-      <ErrorState error={err} onRetry={rerun}>
-        <p className="text-[11.5px] text-faint font-mono">
-          {ca ? `contract ${ca}` : `query ${token}`} — the live feed returned unexpected data
-        </p>
-      </ErrorState>
-    )
-  }
+  const p = sanitizeProfile(data)
 
   const volToCap = p.marketCap ? (p.volume24h / p.marketCap) * 100 : null
   const buys = Number(p.buys24h) || 0
@@ -328,20 +368,9 @@ export default function TokenAnalysis() {
                       {p.chainLabel}
                     </span>
                   )}
-                  {p.isCA && (
-                    <span className="text-[10px] font-mono uppercase tracking-[0.12em] px-2 py-0.5 rounded-full border border-success/35 bg-success/10 text-success">
-                      pinned to contract
-                    </span>
-                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2.5">
                   <CopyChip value={p.ca} />
-                  {p.decimals !== null && p.decimals !== undefined && (
-                    <span className="text-[11px] font-mono text-faint">{p.decimals} decimals</span>
-                  )}
-                  {p.matchType && (
-                    <span className="text-[11px] font-mono text-faint">matched by {matchLabel(p.matchType)}</span>
-                  )}
                 </div>
                 {p.description && (
                   <p className="text-[12.5px] text-snow/70 leading-relaxed mt-3 max-w-2xl break-words">
@@ -365,7 +394,7 @@ export default function TokenAnalysis() {
             <LinkChip href={p.telegram || findSocial(/telegram/i)} icon={MessageCircle}>Telegram</LinkChip>
             <LinkChip href={p.github || findSocial(/github/i)} icon={Github}>GitHub</LinkChip>
             <LinkChip href={p.whitepaper} icon={FileText}>Whitepaper</LinkChip>
-            <LinkChip href={p.dexUrl} icon={Layers}>{p.exchange || 'DEX'} pool</LinkChip>
+            <LinkChip href={p.dexUrl} icon={Layers}>Live chart</LinkChip>
             <LinkChip href={p.explorer} icon={Search}>Explorer</LinkChip>
             <LinkChip href={p.cgUrl} icon={ExternalLink}>Listing</LinkChip>
             {(p.categories || []).slice(0, 4).map((c) => (
@@ -376,13 +405,6 @@ export default function TokenAnalysis() {
           </div>
         </div>
       </motion.div>
-
-      {p.aiNote && (
-        <div className="glass-panel !py-3 !px-4 flex items-start gap-2.5 border-warning/30">
-          <ShieldAlert size={14} className="text-warning mt-0.5 flex-shrink-0" />
-          <p className="text-[12.5px] text-snow/80 leading-relaxed">{p.aiNote}</p>
-        </div>
-      )}
 
       {/* ── live numbers ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -399,7 +421,6 @@ export default function TokenAnalysis() {
           sub={p.poolLiquidityUsd ? `pool ${fmtUsd(p.poolLiquidityUsd)}` : 'pool reserve n/a'}
           delay={0.1}
         />
-        <Stat label="Venue" value={<span className="text-[17px] leading-7">{p.exchange || '—'}</span>} sub={p.pairName || 'DEX pair'} delay={0.14} />
         <Stat
           label="Pair Age"
           value={
@@ -507,12 +528,9 @@ export default function TokenAnalysis() {
 
           <Panel title="Identity & Sources" icon={ShieldAlert} delay={0.26}>
             <div className="space-y-2">
-              <KV k="Matched by" v={matchLabel(p.matchType)} />
               <KV k="Chain" v={p.chainLabel || p.chain || 'unknown'} />
               <KV k="Contract" v={p.ca || 'not published'} />
-              <KV k="Pool / pair" v={p.pairAddress || p.poolAddress || '—'} />
-              <KV k="Venue" v={p.exchange || '—'} />
-              <KV k="Analysis layer" v={layerLabel(p.aiLayer)} tone={p.aiLayer === 'RYO' ? 'text-warning' : 'text-success'} />
+              <KV k="Pool / pair" v={p.pairAddress || '—'} />
             </div>
             <div className="flex flex-wrap gap-1.5 mt-4">
               {[
