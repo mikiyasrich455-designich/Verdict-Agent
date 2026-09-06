@@ -9,20 +9,20 @@ const QWEN_NATIVE = QWEN_BASE.replace(/\/compatible-mode\/v1\/?$/, '')
 const QWEN_KEY = process.env.QWEN_KEY || ''
 
 export const QWEN_MODELS = {
-  // Top agent — research, deep analysis, verdicts, scripts, compare, insights.
-  main: process.env.QWEN_MAIN_MODEL || 'deepseek-v4-pro',
-  chat: process.env.QWEN_CHAT_MODEL || 'deepseek-v4-pro',
-  // Grounded web search needs a Qwen model that accepts enable_search.
-  search: process.env.QWEN_SEARCH_MODEL || 'qwen-flash',
+  // Top agent — research, deep analysis, verdicts, compare, insights, council.
+  main: process.env.QWEN_MAIN_MODEL || 'qwen3.8-max',
+  chat: process.env.QWEN_CHAT_MODEL || 'qwen3.8-flash',
+  // Grounded web search needs a model that accepts enable_search.
+  search: process.env.QWEN_SEARCH_MODEL || 'qwen3.8-flash',
   // Voiceover/script writing — a fast model, not the deep reasoning agent.
-  script: process.env.QWEN_SCRIPT_MODEL || 'qwen-flash',
+  script: process.env.QWEN_SCRIPT_MODEL || 'qwen3.8-flash',
   // Council agents — each side gets its own model, the judge is stronger.
   bull: process.env.QWEN_BULL_MODEL || 'qwen3.6-flash',
-  bear: process.env.QWEN_BEAR_MODEL || 'deepseek-v4-flash-0731',
+  bear: process.env.QWEN_BEAR_MODEL || 'qwen3.7-flash',
   judge: process.env.QWEN_JUDGE_MODEL || 'qwen3.7-plus',
-  // Studio media — exact Qwen Cloud models.
-  image: process.env.QWEN_IMAGE_MODEL || 'wan2.7-image-pro',
-  video: process.env.QWEN_VIDEO_MODEL || 'wan3.0-text-to-video',
+  // Studio media — exact Qwen Cloud models confirmed on this account.
+  image: process.env.QWEN_IMAGE_MODEL || 'qwen-image-plus',
+  video: process.env.QWEN_VIDEO_MODEL || 'wan2.1-t2v-turbo',
   voice: process.env.QWEN_VOICE_MODEL || 'qwen3-tts-flash',
   ttsVoice: process.env.QWEN_TTS_VOICE || 'Ethan',
 }
@@ -82,21 +82,39 @@ export async function callSearch(query, num = 6) {
   return { organic }
 }
 
-// Image generation, normalized to { data: [{ image_url }] }.
-export async function qwenImage(prompt, size = '1024x1024') {
+// Image generation via the native DashScope text2image async flow, normalized to
+// { data: [{ image_url }] }. qwen-image-plus is the confirmed text-to-image model.
+export async function qwenImage(prompt, size = '1024*1024') {
   requireKey()
-  const res = await fetch(`${QWEN_BASE}/images/generations`, {
+  const sz = String(size || '1024*1024').replace('x', '*')
+  const submit = await fetch(`${QWEN_NATIVE}/api/v1/services/aigc/text2image/image-synthesis`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
-    body: JSON.stringify({ model: QWEN_MODELS.image, prompt, size, n: 1 }),
-    signal: AbortSignal.timeout(120000),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}`, 'X-DashScope-Async': 'enable' },
+    body: JSON.stringify({ model: QWEN_MODELS.image, input: { prompt }, parameters: { size: sz, n: 1 } }),
+    signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) throw new Error(`Qwen image failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
-  const data = await res.json()
-  const item = data.data?.[0] || {}
-  const imageUrl = item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : null)
-  if (!imageUrl) throw new Error('Qwen image returned no url')
-  return { data: [{ image_url: imageUrl, url: imageUrl }] }
+  if (!submit.ok) throw new Error(`Qwen image submit failed: ${submit.status} ${(await submit.text()).slice(0, 200)}`)
+  const sdata = await submit.json()
+  const taskId = sdata.output?.task_id
+  if (!taskId) throw new Error('Qwen image: no task_id in response')
+
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 3000))
+    const res = await fetch(`${QWEN_NATIVE}/api/v1/tasks/${taskId}`, {
+      headers: { Authorization: `Bearer ${QWEN_KEY}` },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) continue
+    const data = await res.json()
+    const out = data.output || {}
+    if (out.task_status === 'SUCCEEDED') {
+      const url = out.results?.[0]?.url || out.images?.[0]?.url
+      if (!url) throw new Error('Qwen image: no url in result')
+      return { data: [{ image_url: url, url }] }
+    }
+    if (out.task_status === 'FAILED') throw new Error(`Qwen image failed: ${data.message || out.message || 'task failed'}`)
+  }
+  throw new Error('Qwen image timed out')
 }
 
 // Video generation — native async task flow (submit, then poll from the browser).
@@ -112,7 +130,8 @@ export async function qwenVideoSubmit(prompt, duration = 5) {
     body: JSON.stringify({
       model: QWEN_MODELS.video,
       input: { prompt },
-      parameters: { size: '1280*720', duration: Math.min(Number(duration) || 15, 15), prompt_extend: true },
+      // wan2.1-t2v-turbo produces a 720p ~5s clip; other durations are rejected.
+      parameters: { size: '1280*720', duration: 5, prompt_extend: true },
     }),
     signal: AbortSignal.timeout(30000),
   })
@@ -141,22 +160,31 @@ export async function qwenVideoPoll(taskId) {
   return { status, videoUrl: null, posterUrl: null, failed, message: failed ? (data.message || out.message || status) : '' }
 }
 
-// Voice (TTS) via Qwen's OpenAI-compatible audio endpoint. Returns a data URL the
-// browser can play immediately — no asset is ever stored on our side.
+// Voice (TTS) via the native DashScope multimodal-generation endpoint. Returns a durable
+// data URL the browser can play immediately — no asset is ever stored on our side.
 export async function qwenTTS(text, voice = QWEN_MODELS.ttsVoice) {
   requireKey()
   const input = String(text || '').trim()
   if (!input) throw new Error('TTS text is empty')
 
-  const res = await fetch(`${QWEN_BASE}/audio/speech`, {
+  const res = await fetch(`${QWEN_NATIVE}/api/v1/services/aigc/multimodal-generation/generation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
-    body: JSON.stringify({ model: QWEN_MODELS.voice, input, voice, response_format: 'mp3' }),
+    body: JSON.stringify({ model: QWEN_MODELS.voice, input: { text: input }, parameters: { voice, format: 'mp3' } }),
     signal: AbortSignal.timeout(120000),
   })
   if (!res.ok) throw new Error(`Qwen TTS failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
 
-  const bytes = Buffer.from(await res.arrayBuffer())
+  const data = await res.json()
+  const audioUrl = data.output?.audio?.url
+  if (!audioUrl) throw new Error('Qwen TTS returned no audio url')
+
+  const ar = await fetch(audioUrl, { signal: AbortSignal.timeout(60000) })
+  if (!ar.ok) throw new Error(`Qwen TTS download failed: ${ar.status}`)
+  const bytes = Buffer.from(await ar.arrayBuffer())
   if (!bytes.length) throw new Error('Qwen TTS returned empty audio')
-  return { dataUrl: `data:audio/mp3;base64,${bytes.toString('base64')}`, bytes: bytes.length }
+
+  const ct = ar.headers.get('content-type') || ''
+  const mime = /mpeg/.test(ct) || /\.mp3($|\?)/i.test(audioUrl) ? 'audio/mpeg' : 'audio/wav'
+  return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}`, bytes: bytes.length }
 }

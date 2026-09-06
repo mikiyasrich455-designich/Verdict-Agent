@@ -746,75 +746,61 @@ router.post('/script', async (req, res) => {
       return res.json(cached)
     }
 
-    // Reuse the already-computed deep verdict when present so Studio opens fast;
-    // otherwise run the parallel research once and cache it for the verdict too.
-    const verdictCacheKey = `synthesis:verdict:${symbol.toLowerCase()}`
-    let verdictData = getCache(verdictCacheKey)
-    if (verdictData) {
-      console.log('[SCRIPT] Reusing cached verdict (fast path)')
-    } else {
-      console.log('[SCRIPT] Running parallel analysis (RYO + SERP)...')
-      verdictData = await deepAnalyze(symbol, req.tokenIdentity)
-      setCache(verdictCacheKey, verdictData, 30 * 60 * 1000)
-    }
+    // Fast studio path: one quick LLM pass over the already-resolved live market data
+    // (no RYO / SERP / deep reasoning) so Image/Video/Voice studios open in a few seconds.
+    const live = req.tokenIdentity || {}
+    const sym = symbol.toUpperCase()
+    const priceUsd = Number(live.priceUsd) || 0
+    const change24h = Number(live.change24h) || 0
+    const cap = Number(live.marketCap) || 0
+    const vol = Number(live.volume24h) || 0
 
-    // Build script prompt from verdict data
-    const scriptPrompt = `Write a DETAILED, PROFESSIONAL voiceover script for a crypto analysis video about ${symbol.toUpperCase()}.
-${req.tokenIdentity?.ca ? `EXACT TOKEN IDENTITY: contract ${req.tokenIdentity.ca} on ${req.tokenIdentity.chainLabel || req.tokenIdentity.chain || 'resolved chain'}. Speak ONLY about this exact token — never substitute another coin, ticker or chain.\n` : 'SPEAK ONLY about the exact token above — never substitute another coin, ticker or chain.\n'}
-VERDICT: ${verdictData.verdict} | CONFIDENCE: ${verdictData.confidence}% | BULL: ${verdictData.bullScore}% | BEAR: ${verdictData.bearScore}%
+    console.log('[SCRIPT] Fast studio script (single LLM pass over live data)...')
+    const scriptRes = await callLLM([
+      { role: 'system', content: 'You are a professional crypto studio writer. Output ONLY valid JSON — no markdown, no code fences, no prose.' },
+      { role: 'user', content: `Write a short, evidence-grounded market analysis for a video about ${sym}. Use ONLY the live data below. Lead with a verdict, then the bull case vs the bear case, weighing growth potential against risk. No buy/sell instructions, no hype, no fear.\n\nNAME: ${live.name || sym}\nPRICE: $${priceUsd.toLocaleString()}\n24H CHANGE: ${change24h.toFixed(2)}%\nMARKET CAP: $${(cap / 1e6).toFixed(1)}M\n24H VOLUME: $${(vol / 1e6).toFixed(1)}M\n\nRespond with ONLY JSON:\n{"verdict":"BUY"|"HOLD"|"AVOID","confidence":<0-100>,"bullScore":<0-100>,"bearScore":<0-100>,"script":"<150-220 word spoken script>"}` },
+    ], QWEN_MODELS.script, 1800)
 
-PILLARS:
-${Object.entries(verdictData.scores || {}).map(([k, v]) => `- ${k.toUpperCase()}: ${v.score}/100 — ${v.reasoning}`).join('\n')}
+    const j = extractJson(scriptRes) || {}
+    const verdict = ['BUY', 'HOLD', 'AVOID'].includes(String(j.verdict).toUpperCase()) ? String(j.verdict).toUpperCase() : 'HOLD'
+    const confidence = clampScore(firstNum(j.confidence, 60))
+    const bullScore = clampScore(firstNum(j.bullScore, 50))
+    const bearScore = clampScore(firstNum(j.bearScore, 50))
 
-BULL CASE: ${(verdictData.bullReasons || []).map(r => `- ${r}`).join('\n')}
-BEAR CASE: ${(verdictData.bearReasons || []).map(r => `- ${r}`).join('\n')}
-SUMMARY: ${verdictData.summary}
-
-SCRIPT REQUIREMENTS:
-1. LENGTH: 300-500 words (~2-3 min spoken)
-2. TONE: Professional, authoritative, data-driven. No hype, no fear-mongering.
-3. STRUCTURE: Opening → Market Context → Bull Arguments → Bear Arguments → Key Levels → Conclusion
-4. END with: "This is not financial advice. Trade the evidence, not the noise."
-
-Write the complete script now. No placeholders, no [pause]. Just the spoken text.`
-
-    console.log('[SCRIPT] Generating script via fast writer model...')
-    const script = await callLLM([
-      { role: 'system', content: 'You are a professional financial content writer. Write clear, engaging, data-driven scripts. Always deliver complete scripts with no placeholders.' },
-      { role: 'user', content: scriptPrompt },
-    ], QWEN_MODELS.script, 3000)
-
-    let scriptText = script
+    let scriptText = String(j.script || '')
       .replace(/^```[\s]*\n?/, '')
       .replace(/\n?```$/, '')
       .trim()
 
+    if (!scriptText) {
+      const dir = change24h >= 0 ? 'up' : 'down'
+      scriptText = `${live.name || sym} is trading at $${priceUsd.toLocaleString()}, ${dir} ${change24h.toFixed(2)}% over 24 hours, with a market cap near $${(cap / 1e6).toFixed(1)}M. The bull case rests on momentum, while the bear case weighs mean-reversion risk. Balance growth potential against risk.`
+    }
     if (!scriptText.toLowerCase().includes('not financial advice')) {
       scriptText += '\n\nThis is not financial advice. Trade the evidence, not the noise.'
     }
 
     const data = {
-      symbol: verdictData.symbol,
-      name: verdictData.name,
-      verdict: verdictData.verdict,
-      confidence: verdictData.confidence,
-      bullScore: verdictData.bullScore,
-      bearScore: verdictData.bearScore,
+      symbol: sym,
+      name: live.name || sym,
+      verdict,
+      confidence,
+      bullScore,
+      bearScore,
       script: scriptText,
-      tone: verdictData.verdict === 'BUY' ? 'confident and steady' : verdictData.verdict === 'HOLD' ? 'measured and calm' : 'firm and cautionary',
-      duration: Math.max(90, Math.round(scriptText.length / 3)),
+      tone: verdict === 'BUY' ? 'confident and steady' : verdict === 'HOLD' ? 'measured and calm' : 'firm and cautionary',
+      duration: Math.max(30, Math.round(scriptText.length / 3)),
       wordCount: scriptText.split(/\s+/).length,
       artDirection: {
         BUY: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
         HOLD: { palette: ['#5b93ff', '#a78bfa', '#64748b'], motif: 'Balanced scales of light suspended above a glowing market grid, calm, cinematic' },
         AVOID: { palette: ['#f87171', '#5b93ff', '#334155'], motif: 'Red bear chains wrapped around a fracturing coin, dramatic shadows, warning mood' },
-      }[verdictData.verdict],
+      }[verdict],
       asOf: new Date().toISOString(),
     }
 
-    setCache(cacheKey, data, 30 * 60 * 1000)
+    setCache(cacheKey, data, 15 * 60 * 1000)
     log('POST', '/synthesis/script', 200, Date.now() - start)
-    console.log('[SCRIPT] Done:', data.wordCount, 'words,', Date.now() - start, 'ms')
     res.json(data)
   } catch (err) {
     console.error('[SCRIPT ERROR]', err)
