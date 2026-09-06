@@ -11,6 +11,7 @@ import {
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
 import { resolveCaInBody } from '../lib/caGuard.js'
+import { callLLM, callSearch } from '../lib/llm.js'
 
 const router = Router()
 
@@ -37,54 +38,8 @@ async function callRyoTool(toolName, body = {}) {
   return res.json()
 }
 
-// ── AceData SERP search helper ───────────────────────────────────
-async function callAceSerp(query, num = 10) {
-  const url = `${process.env.ACEDATA_BASE}/serp/google`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
-    },
-    body: JSON.stringify({ type: 'search', query, number: num }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`SERP failed: ${res.status} ${text}`)
-  }
-
-  return res.json()
-}
-
-// ── AceData Chat helper (Grok) ───────────────────────────────────
-async function callAceChat(messages, model = 'grok-4', maxTokens = 4000) {
-  const url = `${process.env.ACEDATA_BASE}/v1/chat/completions`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.3,
-    }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`AceData Chat failed: ${res.status} ${text}`)
-  }
-
-  const data = await res.json()
-  return data.choices[0].message.content
-}
-
-// ── Deep forensic analysis: SERP + RYO + Grok (PARALLEL) ──────────
-async function deepAnalyze(symbol) {
+// ── Deep forensic analysis: SERP + RYO + LLM (PARALLEL) ──────────
+async function deepAnalyze(symbol, live = null) {
   const symbolUpper = symbol.toUpperCase()
   const t0 = Date.now()
 
@@ -103,7 +58,7 @@ async function deepAnalyze(symbol) {
       ]
       const allResults = []
       const results = await Promise.allSettled(
-        queries.map(q => callAceSerp(q, 5).catch(e => {
+        queries.map(q => callSearch(q, 5).catch(e => {
           console.log('[DEEP] SERP failed for query:', q, e.message)
           return null
         }))
@@ -148,6 +103,7 @@ async function deepAnalyze(symbol) {
 
 SYMBOL: ${symbolUpper}
 NAME: ${asset.name || symbolUpper}
+${live?.ca ? `EXACT TOKEN IDENTITY: contract ${live.ca} on ${live.chainLabel || live.chain || 'resolved chain'}. Analyze ONLY this exact token — never substitute another coin, ticker or chain.` : 'IDENTITY: resolve strictly by the SYMBOL above — never substitute another coin, ticker or chain.'}
 CURRENT PRICE: $${(market.price_usd || 0).toLocaleString()}
 24H CHANGE: ${perf.change_24h_pct || 0}%
 7D CHANGE: ${perf.change_7d_pct || 0}%
@@ -197,22 +153,22 @@ IMPORTANT RULES:
 - bullScore + bearScore ≈ 100 (±15). Verdict: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD.
 - Ground all reasoning in the provided market data and web results. Never name the data providers, tools or models behind the inputs — write as an analyst, not an integration log.`
 
-  // Call Grok for deep analysis
-  console.log(`[DEEP] ${symbolUpper}: Calling Grok for analysis...`)
+  // Call the reasoning model for deep analysis
+  console.log(`[DEEP] ${symbolUpper}: Calling reasoning model for analysis...`)
   const tGrokStart = Date.now()
-  let response = await callAceChat([
+  let response = await callLLM([
     { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
     { role: 'user', content: prompt },
-  ], 'grok-4', 4000)
+  ], undefined, 4000)
   let analysis = extractJson(response)
 
   // Retry once if the model did not return parseable JSON
   if (!analysis) {
     console.log('[DEEP] Response was not valid JSON, retrying once...')
-    response = await callAceChat([
+    response = await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
-    ], 'grok-4', 4000)
+    ], undefined, 4000)
     analysis = extractJson(response)
   }
   if (!analysis) {
@@ -315,7 +271,7 @@ export async function grokLiveInsights(live) {
   const sym = String(live?.symbol || '').toUpperCase()
   const name = live?.name || sym
 
-  const serp = await callAceSerp(`${name} ${sym} crypto token news analysis`, 6).catch((e) => {
+  const serp = await callSearch(`${name} ${sym} crypto token news analysis`, 6).catch((e) => {
     console.log('[INSIGHTS] SERP failed:', e.message)
     return null
   })
@@ -340,10 +296,10 @@ Respond with ONLY a valid JSON object:
 }
 3-5 catalysts and 3-5 risks, each a concrete sentence citing a number or headline.`
 
-  const text = await callAceChat([
+  const text = await callLLM([
     { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
     { role: 'user', content: prompt },
-  ], 'grok-4', 2000)
+  ], undefined, 2000)
 
   const parsed = extractJson(text)
   if (!parsed) return null
@@ -410,10 +366,10 @@ SCRIPT REQUIREMENTS:
 
 Write the complete script now. No placeholders, no [pause], no instructions. Just the spoken text.`
 
-  const response = await callAceChat([
+  const response = await callLLM([
     { role: 'system', content: 'You are a professional financial content writer. Write clear, engaging, data-driven scripts for financial analysis videos. Always deliver complete scripts with no placeholders.' },
     { role: 'user', content: prompt },
-  ], 'grok-4', 3000)
+  ], undefined, 3000)
 
   // Clean up the response — remove markdown if present
   let script = response
@@ -453,10 +409,10 @@ router.post('/verdict', async (req, res) => {
     }
 
     console.log('[VERDICT] Running deep forensic analysis...')
-    const data = await deepAnalyze(symbol)
+    const data = await deepAnalyze(symbol, req.tokenIdentity)
 
     console.log(`[VERDICT] Analysis complete: ${data.verdict} ${data.confidence}% (${data.timing?.totalMs}ms)`)
-    setCache(cacheKey, data, 10 * 60 * 1000)
+    setCache(cacheKey, data, 30 * 60 * 1000)
     log('POST', '/synthesis/verdict', 200, Date.now() - start)
     // Include timing in response for frontend progress
     res.json({ ...data, elapsedMs: Date.now() - start })
@@ -519,8 +475,8 @@ async function buildEvidencePack(symbol, live) {
 
   const [ryoRes, newsRes, riskRes] = await Promise.allSettled([
     callRyoTool('analyze_token', { symbol: sym }),
-    callAceSerp(`${name} ${sym} crypto token latest news price`, 6),
-    callAceSerp(`${name} ${sym} crypto token risk liquidity concerns`, 6),
+    callSearch(`${name} ${sym} crypto token latest news price`, 6),
+    callSearch(`${name} ${sym} crypto token risk liquidity concerns`, 6),
   ])
 
   const lines = []
@@ -572,28 +528,28 @@ async function runCouncil(symbol, live) {
 
   // Round 1 — independent opening cases (parallel)
   const [bullOpenRes, bearOpenRes] = await Promise.all([
-    callAceChat([
+    callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 120-180 words. Cite specific numbers from the pack.` },
-    ], 'grok-4', 1400).catch(() => ''),
-    callAceChat([
+    ], undefined, 1400).catch(() => ''),
+    callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 120-180 words. Cite specific numbers from the pack.` },
-    ], 'grok-4', 1400).catch(() => ''),
+    ], undefined, 1400).catch(() => ''),
   ])
   const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
   const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
 
   // Round 2 — cross-examination (parallel, each reads the other's opening)
   const [bullRebutRes, bearRebutRes] = await Promise.all([
-    callAceChat([
+    callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], 'grok-4', 1200).catch(() => ''),
-    callAceChat([
+    ], undefined, 1200).catch(() => ''),
+    callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], 'grok-4', 1200).catch(() => ''),
+    ], undefined, 1200).catch(() => ''),
   ])
   const bullRebut = String(bullRebutRes || '').trim() || bullOpen
   const bearRebut = String(bearRebutRes || '').trim() || bearOpen
@@ -611,15 +567,15 @@ ${evidence}
 Score how well each side grounded its claims in the evidence (0-100 each), then rule. Respond with ONLY a valid JSON object:
 {"bullScore": <0-100>, "bearScore": <0-100>, "verdict": "BUY"|"HOLD"|"AVOID", "confidence": <0-100>, "text": "<3-5 sentence ruling citing the decisive evidence. Never name data providers, APIs or models.>"}`
 
-  let judge = extractJson(await callAceChat([
+  let judge = extractJson(await callLLM([
     { role: 'system', content: JUDGE_ROLE },
     { role: 'user', content: judgePrompt },
-  ], 'grok-4', 1600).catch(() => ''))
+  ], undefined, 1600).catch(() => ''))
   if (!judge) {
-    judge = extractJson(await callAceChat([
+    judge = extractJson(await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: judgePrompt },
-    ], 'grok-4', 1600).catch(() => ''))
+    ], undefined, 1600).catch(() => ''))
   }
 
   const bull100 = clampScore(firstNum(judge?.bullScore))
@@ -681,7 +637,7 @@ router.post('/council', async (req, res) => {
     const live = req.tokenIdentity || null
     console.log('[COUNCIL] Running adversarial council for:', symbol, live?.ca || '')
     const data = await runCouncil(symbol, live)
-    setCache(cacheKey, data, 10 * 60 * 1000)
+    setCache(cacheKey, data, 30 * 60 * 1000)
     log('POST', '/synthesis/council', 200, Date.now() - start)
     res.json(data)
   } catch (err) {
@@ -778,11 +734,11 @@ router.post('/script', async (req, res) => {
 
     // Reuse deepAnalyze (now parallel SERP) — single Grok call for analysis
     console.log('[SCRIPT] Running parallel analysis (RYO + SERP)...')
-    const verdictData = await deepAnalyze(symbol)
+    const verdictData = await deepAnalyze(symbol, req.tokenIdentity)
 
     // Build script prompt from verdict data
     const scriptPrompt = `Write a DETAILED, PROFESSIONAL voiceover script for a crypto analysis video about ${symbol.toUpperCase()}.
-
+${req.tokenIdentity?.ca ? `EXACT TOKEN IDENTITY: contract ${req.tokenIdentity.ca} on ${req.tokenIdentity.chainLabel || req.tokenIdentity.chain || 'resolved chain'}. Speak ONLY about this exact token — never substitute another coin, ticker or chain.\n` : 'SPEAK ONLY about the exact token above — never substitute another coin, ticker or chain.\n'}
 VERDICT: ${verdictData.verdict} | CONFIDENCE: ${verdictData.confidence}% | BULL: ${verdictData.bullScore}% | BEAR: ${verdictData.bearScore}%
 
 PILLARS:
@@ -800,11 +756,11 @@ SCRIPT REQUIREMENTS:
 
 Write the complete script now. No placeholders, no [pause]. Just the spoken text.`
 
-    console.log('[SCRIPT] Generating script via Grok...')
-    const script = await callAceChat([
+    console.log('[SCRIPT] Generating script via reasoning model...')
+    const script = await callLLM([
       { role: 'system', content: 'You are a professional financial content writer. Write clear, engaging, data-driven scripts. Always deliver complete scripts with no placeholders.' },
       { role: 'user', content: scriptPrompt },
-    ], 'grok-4', 3000)
+    ], undefined, 3000)
 
     let scriptText = script
       .replace(/^```[\s]*\n?/, '')
@@ -824,7 +780,7 @@ Write the complete script now. No placeholders, no [pause]. Just the spoken text
       bearScore: verdictData.bearScore,
       script: scriptText,
       tone: verdictData.verdict === 'BUY' ? 'confident and steady' : verdictData.verdict === 'HOLD' ? 'measured and calm' : 'firm and cautionary',
-      duration: `~${Math.max(90, Math.round(scriptText.length / 3))}s`,
+      duration: Math.max(90, Math.round(scriptText.length / 3)),
       wordCount: scriptText.split(/\s+/).length,
       artDirection: {
         BUY: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
@@ -834,7 +790,7 @@ Write the complete script now. No placeholders, no [pause]. Just the spoken text
       asOf: new Date().toISOString(),
     }
 
-    setCache(cacheKey, data, 10 * 60 * 1000)
+    setCache(cacheKey, data, 30 * 60 * 1000)
     log('POST', '/synthesis/script', 200, Date.now() - start)
     console.log('[SCRIPT] Done:', data.wordCount, 'words,', Date.now() - start, 'ms')
     res.json(data)
@@ -844,7 +800,5 @@ Write the complete script now. No placeholders, no [pause]. Just the spoken text
     res.status(500).json({ error: err.message, stack: err.stack })
   }
 })
-
-export { callAceChat, callAceSerp, extractJson }
 
 export default router

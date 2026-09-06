@@ -1,51 +1,5 @@
-// KOL Discovery via SERP + Grok — real data from X, YouTube, News
-import fetch from 'node-fetch'
-
-// ── AceData SERP search helper ───────────────────────────────────
-async function callAceSerp(query, num = 10) {
-  const url = `${process.env.ACEDATA_BASE}/serp/google`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
-    },
-    body: JSON.stringify({ type: 'search', query, number: num }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`SERP failed: ${res.status} ${text}`)
-  }
-
-  return res.json()
-}
-
-// ── AceData Chat helper (Grok) ───────────────────────────────────
-async function callAceChat(messages, model = 'grok-4', maxTokens = 4000) {
-  const url = `${process.env.ACEDATA_BASE}/v1/chat/completions`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.3,
-    }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`AceData Chat failed: ${res.status} ${text}`)
-  }
-
-  const data = await res.json()
-  return data.choices[0].message.content
-}
+// KOL Discovery via Qwen live search + grounded LLM — real data from X, YouTube, News
+import { callLLM, callSearch } from './llm.js'
 
 // ── Robust JSON extraction from LLM output ───────────────────────
 function extractJson(text) {
@@ -76,7 +30,7 @@ export async function discoverKols(symbol) {
 
   const allResults = []
   const serpRes = await Promise.allSettled(
-    queries.map(q => callAceSerp(q, 6).catch(e => {
+    queries.map(q => callSearch(q, 6).catch(e => {
       console.log('[KOLS] SERP failed for query:', q, e.message)
       return null
     }))
@@ -154,10 +108,10 @@ IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no explanat
 
   let response
   try {
-    response = await callAceChat([
+    response = await callLLM([
       { role: 'system', content: 'You are a precise data extraction engine. Return ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: prompt },
-    ], 'grok-4', 4000)
+    ], undefined, 4000)
   } catch (e) {
     console.log('[KOLS] Grok extraction failed:', e.message)
     response = null

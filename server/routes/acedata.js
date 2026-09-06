@@ -3,34 +3,9 @@ import fetch from 'node-fetch'
 import { rateLimit } from '../lib/rateLimit.js'
 import { getCache, setCache } from '../lib/cache.js'
 import { log, error } from '../lib/logger.js'
+import { callLLM, qwenImage, qwenVideoSubmit, qwenVideoPoll } from '../lib/llm.js'
 
 const router = Router()
-
-// AceData Chat helper — lazy env read
-async function callAceChat(messages, model = 'grok-4', maxTokens = 2000) {
-  const url = `${process.env.ACEDATA_BASE}/v1/chat/completions`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ACEDATA_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`AceData Chat failed: ${res.status} ${text}`)
-  }
-
-  const data = await res.json()
-  return data.choices[0].message.content
-}
 
 // POST /api/proxy/acedata/serp — Google SERP
 router.post('/serp', async (req, res) => {
@@ -90,7 +65,7 @@ router.post('/chat', async (req, res) => {
   }
 
   try {
-    const content = await callAceChat(messages, model, maxTokens)
+    const content = await callLLM(messages, model === 'grok-4' ? undefined : model, maxTokens)
     log('POST', '/acedata/chat', 200, Date.now() - start)
     res.json({ content })
   } catch (err) {
@@ -114,7 +89,15 @@ router.post('/image', async (req, res) => {
     return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
   }
 
-  // Try Seedream first (cheapest, direct response, no polling)
+  // Qwen image first (pay-as-you-go, cheapest), then Seedream/Flux
+  try {
+    const qwen = await qwenImage(prompt, size === '16:9' ? '1280x720' : '1024x1024')
+    log('POST', '/acedata/image', 200, Date.now() - start, '(qwen)')
+    return res.json(qwen)
+  } catch (e) {
+    console.log('[IMAGE] Qwen image unavailable, trying AceData:', e.message)
+  }
+
   try {
     const seedreamModel = model || 'doubao-seedream-5-0-pro-260628'
     const url = `${process.env.ACEDATA_BASE}/seedream/images`
@@ -302,6 +285,16 @@ router.post('/video', async (req, res) => {
       callback_url: process.env.ACEDATA_CALLBACK_URL || 'https://api.acedata.cloud/health',
     })
 
+    // Qwen video first (pay-as-you-go); task ids are prefixed so the status route
+    // knows which backend owns the task.
+    try {
+      const qwTask = await qwenVideoSubmit(prompt, duration)
+      log('POST', '/acedata/video', 200, Date.now() - start, '(queued qwen)')
+      return res.json({ queued: true, task_id: `qw:${qwTask}` })
+    } catch (e) {
+      console.log('[VIDEO] Qwen video unavailable, trying Seedance:', e.message)
+    }
+
     let lastProblem = null
     for (const model of VIDEO_MODELS) {
       let fetchRes
@@ -369,10 +362,30 @@ router.post('/video', async (req, res) => {
 // a GET on /seedance/tasks/:id 404s, which is why every poll used to come back empty.
 router.get('/video/status/:taskId', async (req, res) => {
   const start = Date.now()
-  const taskId = String(req.params.taskId || '').replace(/[^A-Za-z0-9_-]/g, '')
+  const rawId = String(req.params.taskId || '')
+  const taskId = rawId.replace(/[^A-Za-z0-9_:-]/g, '')
   if (!taskId) return res.status(400).json({ error: 'taskId required' })
 
   try {
+    if (taskId.startsWith('qw:')) {
+      const poll = await qwenVideoPoll(taskId.slice(3))
+      if (poll.httpStatus === 404) {
+        return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
+      }
+      if (poll.httpStatus) return res.json({ done: false, status: `poll_${poll.httpStatus}` })
+      if (poll.videoUrl || poll.failed) {
+        log('GET', '/acedata/video/status', 200, Date.now() - start, `(qwen ${poll.videoUrl ? 'done' : 'failed'})`)
+        return res.json({
+          done: true,
+          videoUrl: poll.videoUrl,
+          posterUrl: poll.posterUrl,
+          status: poll.status,
+          error: poll.failed && !poll.videoUrl ? `Render failed (${poll.status}): ${poll.message}` : null,
+        })
+      }
+      return res.json({ done: false, status: poll.status, videoUrl: null, posterUrl: null })
+    }
+
     const poll = await pollTask(taskId)
 
     if (poll.httpStatus === 404) {
