@@ -8,7 +8,6 @@ import CautionPage from './pages/CautionPage'
 import LandingPage from './pages/LandingPage'
 import VerdictPage from './pages/VerdictPage'
 import YourToken from './pages/dashboard/YourToken'
-import Scout from './pages/dashboard/Scout'
 import MarketOverview from './pages/dashboard/MarketOverview'
 import TokenAnalysis from './pages/dashboard/TokenAnalysis'
 import DeepAnalysis from './pages/dashboard/DeepAnalysis'
@@ -43,7 +42,6 @@ function DashboardArea() {
     <Routes>
       <Route element={<DashboardShell />}>
         <Route index element={<YourToken />} />
-        <Route path="scout" element={<Scout />} />
         <Route path="overview" element={<MarketOverview />} />
         <Route path="analysis" element={<TokenAnalysis />} />
         <Route path="deep" element={<DeepAnalysis />} />

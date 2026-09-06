@@ -26,15 +26,28 @@ function platformOf(url) {
   return 'web'
 }
 
+// Derive a real creator handle from the post URL (deterministic — not invented).
+function handleFromUrl(url) {
+  const u = String(url || '')
+  const x = u.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})/)
+  if (x && !['status', 'search', 'home', 'explore', 'i'].includes(x[1])) return `@${x[1]}`
+  const yt = u.match(/youtube\.com\/@([A-Za-z0-9_.-]+)/) || u.match(/youtube\.com\/(?:user|channel)\/([A-Za-z0-9_.-]+)/)
+  if (yt) return `@${yt[1]}`
+  const rd = u.match(/reddit\.com\/user\/([A-Za-z0-9_-]+)/) || u.match(/reddit\.com\/r\/([A-Za-z0-9_]+)/)
+  if (rd) return `u/${rd[1]}`
+  return ''
+}
+
 export async function discoverKols(symbol) {
   const symbolUpper = String(symbol || '').toUpperCase()
   console.log(`[KOLS] Sovereign social sweep for ${symbolUpper}...`)
 
   const queries = [
-    `site:x.com ${symbolUpper} crypto`,
-    `${symbolUpper} crypto Twitter thread opinion`,
-    `${symbolUpper} crypto reddit discussion`,
-    `${symbolUpper} crypto news analysis`,
+    `${symbolUpper} crypto latest posts site:x.com OR site:twitter.com`,
+    `${symbolUpper} token reddit discussion site:reddit.com`,
+    `${symbolUpper} crypto review site:youtube.com`,
+    `${symbolUpper} crypto news today latest`,
+    `${symbolUpper} price analysis this week popular`,
   ]
 
   const raw = []
@@ -69,7 +82,10 @@ export async function discoverKols(symbol) {
   }
 
   const allowedUrls = new Set(posts.map((p) => p.url))
-  const bundle = posts.map((p) => `- Title: ${p.title}\n  URL: ${p.url}\n  Snippet: ${p.snippet}`).join('\n')
+  const bundle = posts.map((p) => {
+    const author = handleFromUrl(p.url)
+    return `- Title: ${p.title}\n  URL: ${p.url}\n  Author/creator handle (from URL): ${author || 'unknown'}\n  Snippet: ${p.snippet}`
+  }).join('\n')
 
   const prompt = `You are the elite Sovereign KOL Sentiment & Social Intelligence Engine for the Verdict Agent Console. Analyze the live real-time feed of crypto social posts for the token below and synthesize high-impact, actionable market analytics.
 
@@ -125,8 +141,9 @@ Every "url" in top_voices_list MUST be copied EXACTLY from the RAW SOCIAL POSTS 
         : 'NEUTRAL'
       const impact = String(v.impact_score || '').toUpperCase() === 'HIGH' ? 'HIGH' : 'MEDIUM'
       const url = allowedUrls.has(v.url) ? String(v.url) : ''
+      const handle = (v.handle && String(v.handle) !== '@unknown') ? String(v.handle) : (handleFromUrl(url) || '@unknown')
       return {
-        handle: String(v.handle || '@unknown'),
+        handle,
         sentiment,
         impact_score: impact,
         alpha_takeaway: String(v.alpha_takeaway || 'No structural point extracted.'),
@@ -152,6 +169,7 @@ Every "url" in top_voices_list MUST be copied EXACTLY from the RAW SOCIAL POSTS 
     news: posts.slice(0, 6).map((p) => ({
       title: p.title,
       source: platformOf(p.url),
+      author: handleFromUrl(p.url),
       url: p.url,
       age: 'recent',
     })),

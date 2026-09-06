@@ -217,7 +217,7 @@ export default function MarketOverview() {
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted mb-2">Agent note</p>
             <p className="text-[12px] text-snow/80 leading-relaxed">
               {d.regime === 'risk-on'
-                ? 'Scout and Council agents run aggressive playbooks in this regime.'
+                ? 'Council and analysis agents run aggressive playbooks in this regime.'
                 : d.regime === 'risk-off'
                 ? 'Risk Desk tightens stops automatically when the regime flips risk-off.'
                 : 'Neutral regime — agents weight catalysts over momentum.'}

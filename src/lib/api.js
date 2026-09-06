@@ -269,19 +269,19 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → Qwen video model (async task): POST /video submits, GET /video/status/:id polls.
+// Video → AceData Veo (async task): POST /video submits, GET /video/status/:id polls.
 // Prompt is built behind the scenes — a realistic female news anchor delivering the
-// data-driven analysis for ~15s, never motion graphics.
+// data-driven analysis, never motion graphics.
 export async function generateStudioVideo(script, onStatus) {
   const symbol = script?.symbol || 'TOKEN'
-  const prompt = `A realistic 15-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
+  const prompt = `A realistic 8-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
 
   try {
     onStatus?.('Submitting render job…')
     const res = await fetch('/api/proxy/studio/video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, duration: 15 }),
+      body: JSON.stringify({ prompt }),
     })
 
     if (res.ok) {
@@ -291,7 +291,7 @@ export async function generateStudioVideo(script, onStatus) {
         return {
           poster: submitted.posterUrl || submitted.videoUrl,
           videoUrl: submitted.videoUrl,
-          duration: 15,
+          duration: 8,
           resolution: '720p',
           format: 'mp4',
         }
@@ -299,13 +299,13 @@ export async function generateStudioVideo(script, onStatus) {
 
       if (submitted.task_id) {
         onStatus?.('Render queued — generating frames…')
-        for (let i = 0; i < 90; i++) {
-          await wait(4000)
+        for (let i = 0; i < 120; i++) {
+          await wait(2000)
 
           const statusRes = await fetch(`/api/proxy/studio/video/status/${encodeURIComponent(submitted.task_id)}`)
           const status = await statusRes.json().catch(() => ({}))
 
-          const secs = (i + 1) * 4
+          const secs = (i + 1) * 2
           onStatus?.(`Rendering… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} elapsed`)
 
           if (status.done && status.videoUrl) {
@@ -313,7 +313,7 @@ export async function generateStudioVideo(script, onStatus) {
             return {
               poster: status.posterUrl || status.videoUrl,
               videoUrl: status.videoUrl,
-              duration: 15,
+              duration: 8,
               resolution: '720p',
               format: 'mp4',
             }

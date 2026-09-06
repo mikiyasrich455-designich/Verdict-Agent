@@ -3,7 +3,8 @@
 import { Router } from 'express'
 import { rateLimit } from '../lib/rateLimit.js'
 import { log, error } from '../lib/logger.js'
-import { callLLM, callSearch, QWEN_MODELS, qwenImage, qwenVideoSubmit, qwenVideoPoll, qwenTTS } from '../lib/llm.js'
+import { callLLM, callSearch, QWEN_MODELS, qwenImage } from '../lib/llm.js'
+import { aceTTS, aceVideoSubmit, aceVideoPoll } from '../lib/acedata.js'
 
 const router = Router()
 
@@ -80,10 +81,10 @@ router.post('/image', async (req, res) => {
   }
 })
 
-// POST /api/proxy/studio/video — submit Qwen async render, return task id immediately
+// POST /api/proxy/studio/video — submit AceData Veo render, return task id immediately
 router.post('/video', async (req, res) => {
   const start = Date.now()
-  const { prompt, duration = 15 } = req.body
+  const { prompt } = req.body
   if (!prompt) return res.status(400).json({ error: 'prompt required' })
 
   const limit = rateLimit('studio', 10, 60000)
@@ -93,8 +94,8 @@ router.post('/video', async (req, res) => {
   }
 
   try {
-    const taskId = await qwenVideoSubmit(prompt, duration)
-    log('POST', '/studio/video', 200, Date.now() - start, '(queued)')
+    const taskId = await aceVideoSubmit(prompt)
+    log('POST', '/studio/video', 200, Date.now() - start, '(queued · veo)')
     res.json({ queued: true, task_id: taskId })
   } catch (err) {
     error('video', err)
@@ -109,7 +110,7 @@ router.get('/video/status/:taskId', async (req, res) => {
   if (!taskId) return res.status(400).json({ error: 'taskId required' })
 
   try {
-    const poll = await qwenVideoPoll(taskId)
+    const poll = await aceVideoPoll(taskId)
 
     if (poll.httpStatus === 404) {
       return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
@@ -135,9 +136,9 @@ router.get('/video/status/:taskId', async (req, res) => {
   }
 })
 
-// POST /api/proxy/studio/voice — condense the analysis into a tight voiceover, then
-// synthesize it with the Qwen TTS model. The prompt lives entirely behind the scenes;
-// the client only ever gets the finished audio + downloadable script.
+// POST /api/proxy/studio/voice — write a detailed financial briefing from the analysis,
+// then synthesize it with AceData TTS. The prompt lives entirely behind the scenes; the
+// client only ever gets the finished audio + downloadable script.
 router.post('/voice', async (req, res) => {
   const start = Date.now()
   const { text, symbol = '', verdict = 'HOLD', tone = 'neutral' } = req.body
@@ -152,17 +153,17 @@ router.post('/voice', async (req, res) => {
   try {
     const condensed = await callLLM([
       { role: 'system', content: 'You are a professional financial voiceover writer. Deliver ONLY the spoken text — no headings, no markdown, no stage directions, no labels.' },
-      { role: 'user', content: `Turn the analysis below into one professional ~40-word voiceover for a clean, calm, deep male analyst on a trading desk. Lead with the verdict, cite one or two specific numbers, and end with a short disclaimer. Keep it under 15 seconds spoken.\n\nSYMBOL: ${symbol}\nVERDICT: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 4000)}` },
-    ], QWEN_MODELS.script, 400)
+      { role: 'user', content: `Write a detailed, professional ~130-150 word market briefing from the analysis below for a clean, calm, deep male analyst. Cover it all: open with the verdict, state the key numbers (price, 24h change, market cap, volume), then explain WHY it is bullish (the growth case) and WHY it is risky (the bear case), then give one balanced rating of growth-potential versus risk. No buy/sell instructions. End with a one-line disclaimer.\n\nSYMBOL: ${symbol}\nVERDICT: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 6000)}` },
+    ], QWEN_MODELS.script, 600)
 
     let script = String(condensed || '').replace(/```/g, '').trim()
     if (!script) throw new Error('Voiceover script came back empty')
 
-    const audio = await qwenTTS(script)
+    const audio = await aceTTS(script)
     const words = script.split(/\s+/).length
     const duration = Math.max(5, Math.round((words / 2.7) * 10) / 10)
 
-    log('POST', '/studio/voice', 200, Date.now() - start)
+    log('POST', '/studio/voice', 200, Date.now() - start, '(acedata tts)')
     res.json({ script, audioUrl: audio.dataUrl, duration, format: 'mp3', symbol, verdict, tone })
   } catch (err) {
     error('voice', err)

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  TrendingUp, Radar, Globe, Crosshair, Microscope, Scale, Gauge,
+  TrendingUp, Globe, Crosshair, Microscope, Scale, Gauge,
   Gavel, Swords, Megaphone, Radio, Clapperboard, ImageIcon, Film, AudioWaveform,
   Cpu, ShieldAlert, History, LayoutDashboard, ChevronRight, Menu, X,
   Search, Sparkles, CornerDownLeft, ArrowLeft,
@@ -60,7 +60,6 @@ export const NAV_TREE = [
     label: 'MARKET',
     icon: TrendingUp,
     skills: [
-      { to: '/dashboard/scout', label: 'Scout', icon: Radar, hint: 'Meme & token hunter' },
       { to: '/dashboard/overview', label: 'Market Overview', icon: Globe, hint: 'Regime, breadth, movers' },
       { to: '/dashboard/analysis', label: 'Token Analysis', icon: Crosshair, hint: 'Single-token profile' },
       { to: '/dashboard/deep', label: 'Deep Analysis', icon: Microscope, hint: 'Forensic deep dive' },
@@ -109,7 +108,7 @@ export const NAV_TREE = [
 const TOKEN_SCOPED = [
   '/dashboard/analysis', '/dashboard/deep', '/dashboard/council',
   '/dashboard/narrative', '/dashboard/risk', '/dashboard/compare',
-  '/dashboard/scout', '/dashboard/overview',
+  '/dashboard/overview',
   '/dashboard/studio/image', '/dashboard/studio/video', '/dashboard/studio/voice',
 ]
 
