@@ -22,7 +22,11 @@ export function useStudioHistory(kind) {
     (entry) => {
       const all = loadStudioHistory()
       const next = [{ ...entry, kind, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, at: new Date().toISOString() }, ...all].slice(0, 18)
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+      } catch {
+        // Quota exceeded (large media data URLs) — keep the in-memory list going.
+      }
       setItems(next.filter((x) => x.kind === kind))
     },
     [kind]

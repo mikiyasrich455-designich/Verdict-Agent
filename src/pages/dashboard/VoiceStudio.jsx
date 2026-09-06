@@ -9,7 +9,7 @@ import { useAgentData } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioVoice } from '../../lib/api'
 import { PageHeader, Panel, EmptyState, ErrorState } from '../../components/DashUI'
 import { WaveformLoader, ProgressRing, PageSkeleton } from '../../components/Loaders'
-import { useStudioHistory, downloadText, StudioHistoryStrip, DownloadBtn } from './StudioShared'
+import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
 
 export default function VoiceStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -26,12 +26,12 @@ function VoiceStudioInner({ token, pick }) {
   const [progress, setProgress] = useState(0)
   const [output, setOutput] = useState(null)
   const [speaking, setSpeaking] = useState(false)
-  const utterRef = useRef(null)
+  const audioRef = useRef(null)
 
   // stop narration whenever the token / run changes or we unmount
-  useEffect(() => () => window.speechSynthesis?.cancel(), [])
+  useEffect(() => () => { audioRef.current?.pause() }, [])
   useEffect(() => {
-    window.speechSynthesis?.cancel()
+    audioRef.current?.pause()
     setSpeaking(false)
   }, [token])
 
@@ -61,7 +61,7 @@ function VoiceStudioInner({ token, pick }) {
   }
 
   const generate = async () => {
-    window.speechSynthesis?.cancel()
+    audioRef.current?.pause()
     setSpeaking(false)
     setPhase('generating')
     setProgress(0)
@@ -73,6 +73,7 @@ function VoiceStudioInner({ token, pick }) {
         symbol: script.symbol,
         verdict: script.verdict,
         script: res.script,
+        audioUrl: res.audioUrl,
         tone: res.tone,
         duration: res.duration,
         format: res.format,
@@ -88,25 +89,23 @@ function VoiceStudioInner({ token, pick }) {
   }
 
   const togglePlay = (item) => {
-    const synth = window.speechSynthesis
-    if (!synth) return
+    // Stop the current clip if one is already playing.
     if (speaking) {
-      synth.cancel()
+      audioRef.current?.pause()
       setSpeaking(false)
       return
     }
-    const u = new SpeechSynthesisUtterance(item.script)
-    u.rate = 0.98
-    u.pitch = item.verdict === 'BUY' ? 1.05 : item.verdict === 'AVOID' ? 0.9 : 1
-    u.onend = () => setSpeaking(false)
-    u.onerror = () => setSpeaking(false)
-    utterRef.current = u
-    synth.cancel()
-    synth.speak(u)
+    if (!item?.audioUrl) return
+    const audio = new Audio(item.audioUrl)
+    audio.onended = () => setSpeaking(false)
+    audio.onerror = () => setSpeaking(false)
+    audioRef.current = audio
+    audio.play()
     setSpeaking(true)
   }
 
-  const download = (item) => downloadText(item.script, `verdict-${item.symbol.toLowerCase()}-script.txt`)
+  const download = (item) =>
+    downloadDataUrl(item.audioUrl, `verdict-${item.symbol.toLowerCase()}-voice.${item.format || 'mp3'}`)
 
   return (
     <>
@@ -120,20 +119,16 @@ function VoiceStudioInner({ token, pick }) {
       </PageHeader>
 
       <div className="grid lg:grid-cols-5 gap-4">
-        {/* tone card */}
-        <Panel title="Voice Direction" icon={Volume2} delay={0.08} className="lg:col-span-2">
+        {/* voice brief — prompt is generated behind the scenes, never shown here */}
+        <Panel title="Voice Brief" icon={Volume2} delay={0.08} className="lg:col-span-2">
           <div className="space-y-4">
             <div className="tone-card">
               <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Delivery</p>
-              <p className="text-[12.5px] text-snow/85 leading-relaxed">{script.tone}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Script</p>
-              <p className="text-[12.5px] text-muted leading-relaxed italic break-words overflow-hidden">“{script.script}”</p>
+              <p className="text-[12.5px] text-snow/85 leading-relaxed">Clean, deep male analyst voice</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="glass-chip">{script.duration}s</span>
-              <span className="glass-chip">NARRATION · EN</span>
+              <span className="glass-chip">≤ 15s</span>
+              <span className="glass-chip">DEEP MALE · EN</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
@@ -172,7 +167,7 @@ function VoiceStudioInner({ token, pick }) {
                       />
                     ))}
                   </div>
-                  <p className="text-[12.5px] text-muted max-w-md italic">“{output.script}”</p>
+                  <p className="text-[12.5px] text-muted max-w-md">Narration is ready — press play to listen.</p>
                 </motion.div>
               )}
               {phase === 'idle' && !error && (
@@ -196,9 +191,9 @@ function VoiceStudioInner({ token, pick }) {
               <button onClick={() => togglePlay(output)} className="glass-btn">
                 {speaking ? <Pause size={13} /> : <Play size={13} />} {speaking ? 'Pause' : 'Play narration'}
               </button>
-              <DownloadBtn onClick={() => download(output)} label="Download script .txt" />
+              <DownloadBtn onClick={() => download(output)} label="Download .mp3" />
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
-              <span className="ml-auto font-mono text-[10px] text-faint">LIVE TTS VOICE · BROWSER NATIVE</span>
+              <span className="ml-auto font-mono text-[10px] text-faint">QWEN TTS VOICE</span>
             </motion.div>
           )}
         </div>
@@ -207,7 +202,7 @@ function VoiceStudioInner({ token, pick }) {
       <StudioHistoryStrip
         items={history.items}
         activeId={output?.id}
-        onPick={(it) => { window.speechSynthesis?.cancel(); setSpeaking(false); setOutput(it); setPhase('done') }}
+        onPick={(it) => { audioRef.current?.pause(); setSpeaking(false); setOutput(it); setPhase('done') }}
         renderThumb={(it) => ({ background: 'linear-gradient(135deg, rgba(91,147,255,0.28), rgba(2,2,8,0.9))' })}
       />
     </>

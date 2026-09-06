@@ -155,7 +155,7 @@ export default function DeepAnalysis() {
         <div className="flex-1 min-w-0">
           <p className="text-[13px] text-snow/85 leading-relaxed break-words">{v.summary}</p>
           <p className="text-[10px] font-mono text-faint mt-2 tracking-[0.12em]">
-            CONFIDENCE {v.confidence}/100 · DETERMINISTIC · {new Date(v.asOf).toLocaleTimeString()}
+            CONFIDENCE {v.confidence}/100 · AI REASONING · {new Date(v.asOf).toLocaleTimeString()}
           </p>
         </div>
         <div className="flex flex-col gap-2 flex-shrink-0">
@@ -171,15 +171,15 @@ export default function DeepAnalysis() {
           <PillarPanel key={k} k={k} pillar={pillar} delay={0.08 + i * 0.07} />
         ))}
 
-        {/* repeatability card — mirrors the judging criterion */}
+        {/* live reasoning card — reflects the real pipeline, not a seeded template */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.45 }} className="glass-panel border-dashed p-5">
-          <h4 className="text-[13px] font-semibold tracking-tight text-snow/90">Repeatability</h4>
+          <h4 className="text-[13px] font-semibold tracking-tight text-snow/90">Live reasoning</h4>
           <p className="text-[12.5px] text-snow/70 leading-relaxed mt-2 break-words">
-            The same input produces the same verdict every run — the reasoning chain is seeded from the symbol
-            itself, so judges can verify the logic end-to-end.
+            Grounded in real-time market data and live web research for {v.symbol}, then reasoned through the
+            AI analyst on every run — never a cached template.
           </p>
           <p className="text-[10px] font-mono text-muted tracking-[0.14em] mt-3 break-words">
-            SEED · {v.symbol.toUpperCase()} → VERDICT · {v.verdict}
+            {v.timing ? `RESEARCH ${v.timing.dataFetchMs || 0}ms · REASONING ${v.timing.llmMs || 0}ms` : `AS OF ${new Date(v.asOf).toLocaleTimeString()}`}
           </p>
         </motion.div>
       </div>

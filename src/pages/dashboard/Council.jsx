@@ -8,7 +8,7 @@ import DebateBubble from '../../components/DebateBubble'
 import VerdictBadge, { verdictColor } from '../../components/VerdictBadge'
 import { BullMascot, BearMascot } from '../../components/CouncilMascots'
 import { buildReceipt, saveReceipt } from '../../data/receipts'
-import { fetchDebate } from '../../lib/api'
+import { fetchCouncil } from '../../lib/api'
 import { PageHeader, Panel, EmptyState } from '../../components/DashUI'
 import { CouncilLoader } from '../../components/ShadcnLoaders'
 

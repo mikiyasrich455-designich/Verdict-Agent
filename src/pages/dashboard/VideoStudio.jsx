@@ -100,19 +100,15 @@ function VideoStudioInner({ token, pick }) {
       </PageHeader>
 
       <div className="grid lg:grid-cols-5 gap-4">
-        {/* storyboard */}
-        <Panel title="Storyboard" icon={Clapperboard} delay={0.08} className="lg:col-span-2">
+        {/* video brief — prompt is generated behind the scenes, never shown here */}
+        <Panel title="Video Brief" icon={Clapperboard} delay={0.08} className="lg:col-span-2">
           <div className="space-y-4">
             <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Scene direction</p>
-              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words overflow-hidden">{script.script}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Narration tone</p>
-              <p className="text-[12.5px] text-muted break-words">{script.tone}</p>
+              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Concept</p>
+              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Crypto analyst at his desk delivering the verdict, straight to camera</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="glass-chip"><Film size={11} /> {script.duration}s narration</span>
+              <span className="glass-chip"><Film size={11} /> 15s</span>
               <span className="glass-chip">720p · 16:9</span>
             </div>
             <div className="pt-2 border-t border-white/5">

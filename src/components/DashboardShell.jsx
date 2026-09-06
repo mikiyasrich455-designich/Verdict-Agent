@@ -8,7 +8,7 @@ import {
   TrendingUp, Radar, Globe, Crosshair, Microscope, Scale, Gauge,
   Gavel, Swords, Megaphone, Radio, Clapperboard, ImageIcon, Film, AudioWaveform,
   Cpu, ShieldAlert, History, LayoutDashboard, ChevronRight, Menu, X,
-  Search, Sparkles, CornerDownLeft,
+  Search, Sparkles, CornerDownLeft, ArrowLeft,
 } from 'lucide-react'
 import Logo from './Logo'
 import { resolveToken } from '../lib/api'
@@ -332,6 +332,15 @@ function Topbar({ onMenu }) {
 
   return (
     <header className="h-16 flex-shrink-0 flex items-center gap-3 px-4 md:px-6 border-b border-white/5 bg-[rgba(5,7,15,0.72)] backdrop-blur-xl">
+      <Link
+        to="/"
+        className="nav-link p-2 rounded-full flex-shrink-0"
+        aria-label="Back to home"
+        title="Back to home"
+      >
+        <ArrowLeft size={18} />
+      </Link>
+
       <button
         type="button"
         className="lg:hidden nav-link p-2 rounded-full"

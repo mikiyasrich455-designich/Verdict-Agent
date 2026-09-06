@@ -3,7 +3,7 @@
 import { Router } from 'express'
 import { rateLimit } from '../lib/rateLimit.js'
 import { log, error } from '../lib/logger.js'
-import { callLLM, callSearch, qwenImage, qwenVideoSubmit, qwenVideoPoll } from '../lib/llm.js'
+import { callLLM, callSearch, qwenImage, qwenVideoSubmit, qwenVideoPoll, qwenTTS } from '../lib/llm.js'
 
 const router = Router()
 
@@ -83,7 +83,7 @@ router.post('/image', async (req, res) => {
 // POST /api/proxy/studio/video — submit Qwen async render, return task id immediately
 router.post('/video', async (req, res) => {
   const start = Date.now()
-  const { prompt, duration = 5 } = req.body
+  const { prompt, duration = 15 } = req.body
   if (!prompt) return res.status(400).json({ error: 'prompt required' })
 
   const limit = rateLimit('studio', 10, 60000)
@@ -132,6 +132,41 @@ router.get('/video/status/:taskId', async (req, res) => {
   } catch (err) {
     error('video/status', err)
     res.json({ done: false, status: 'poll_error' })
+  }
+})
+
+// POST /api/proxy/studio/voice — condense the analysis into a tight voiceover, then
+// synthesize it with the Qwen TTS model. The prompt lives entirely behind the scenes;
+// the client only ever gets the finished audio + downloadable script.
+router.post('/voice', async (req, res) => {
+  const start = Date.now()
+  const { text, symbol = '', verdict = 'HOLD', tone = 'neutral' } = req.body
+  if (!text) return res.status(400).json({ error: 'text required' })
+
+  const limit = rateLimit('studio', 20, 60000)
+  if (!limit.allowed) {
+    log('POST', '/studio/voice', 429, Date.now() - start)
+    return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
+  }
+
+  try {
+    const condensed = await callLLM([
+      { role: 'system', content: 'You are a professional financial voiceover writer. Deliver ONLY the spoken text — no headings, no markdown, no stage directions, no labels.' },
+      { role: 'user', content: `Turn the analysis below into one professional ~40-word voiceover for a clean, calm, deep male analyst on a trading desk. Lead with the verdict, cite one or two specific numbers, and end with a short disclaimer. Keep it under 15 seconds spoken.\n\nSYMBOL: ${symbol}\nVERDICT: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 4000)}` },
+    ], undefined, 400)
+
+    let script = String(condensed || '').replace(/```/g, '').trim()
+    if (!script) throw new Error('Voiceover script came back empty')
+
+    const audio = await qwenTTS(script)
+    const words = script.split(/\s+/).length
+    const duration = Math.max(5, Math.round((words / 2.7) * 10) / 10)
+
+    log('POST', '/studio/voice', 200, Date.now() - start)
+    res.json({ script, audioUrl: audio.dataUrl, duration, format: 'mp3', symbol, verdict, tone })
+  } catch (err) {
+    error('voice', err)
+    res.status(502).json({ error: err.message })
   }
 })
 

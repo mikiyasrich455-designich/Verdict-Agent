@@ -1,6 +1,6 @@
-// Unified AI backend — Qwen (DashScope intl, pay-as-you-go) is the single provider.
-// Reasoning: qwen-flash + Qwen live web search. Image: qwen-image-2.0.
-// Video: wanx2.1-t2v-turbo via the native async API. Qwen is the only provider.
+// Unified AI backend — Qwen Cloud (DashScope intl, pay-as-you-go) is the single provider.
+// Every model below is overridable via env so a name can be adjusted from Render without
+// a redeploy of code. The top research/analysis agent is the "main" model everywhere.
 import fetch from 'node-fetch'
 
 const QWEN_BASE = process.env.QWEN_BASE || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
@@ -9,9 +9,20 @@ const QWEN_NATIVE = QWEN_BASE.replace(/\/compatible-mode\/v1\/?$/, '')
 const QWEN_KEY = process.env.QWEN_KEY || ''
 
 export const QWEN_MODELS = {
-  chat: process.env.QWEN_CHAT_MODEL || 'qwen-flash',
-  image: process.env.QWEN_IMAGE_MODEL || 'qwen-image-2.0',
-  video: process.env.QWEN_VIDEO_MODEL || 'wanx2.1-t2v-turbo',
+  // Top agent — research, deep analysis, verdicts, scripts, compare, insights.
+  main: process.env.QWEN_MAIN_MODEL || 'deepseek-v4-pro',
+  chat: process.env.QWEN_CHAT_MODEL || 'deepseek-v4-pro',
+  // Grounded web search needs a Qwen model that accepts enable_search.
+  search: process.env.QWEN_SEARCH_MODEL || 'qwen-flash',
+  // Council agents — each side gets its own model, the judge is stronger.
+  bull: process.env.QWEN_BULL_MODEL || 'qwen3.6-flash',
+  bear: process.env.QWEN_BEAR_MODEL || 'deepseek-v4-flash-0731',
+  judge: process.env.QWEN_JUDGE_MODEL || 'qwen3.7-plus',
+  // Studio media.
+  image: process.env.QWEN_IMAGE_MODEL || 'wan2.7-image',
+  video: process.env.QWEN_VIDEO_MODEL || 'happyhorse-1.1-r2v',
+  voice: process.env.QWEN_VOICE_MODEL || 'qwen-audio-3.0-tts-plus',
+  ttsVoice: process.env.QWEN_TTS_VOICE || 'Ethan',
 }
 
 function requireKey() {
@@ -32,7 +43,7 @@ export function extractJsonLite(text) {
 }
 
 // Chat completion via Qwen. Never falls back — a failure is a real error.
-export async function callLLM(messages, model = QWEN_MODELS.chat, maxTokens = 2000, opts = {}) {
+export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 2000, opts = {}) {
   requireKey()
   const body = { model, messages, max_tokens: maxTokens, temperature: opts.temperature ?? 0.4 }
   if (opts.search) body.enable_search = true
@@ -60,7 +71,7 @@ export async function callSearch(query, num = 6) {
   const text = await callLLM([
     { role: 'system', content: 'You are a live web-search result extractor. Respond with ONLY valid JSON.' },
     { role: 'user', content: `Use your live web search for this query: "${query}"\nReturn ONLY a JSON object of the form {"organic":[{"title":"...","link":"...","snippet":"..."}]} with up to ${num} REAL, CURRENT results. Every "link" MUST be a real URL returned by your search — never invent or guess URLs.` },
-  ], QWEN_MODELS.chat, 1500, { search: true, json: true })
+  ], QWEN_MODELS.search, 1500, { search: true, json: true })
 
   const parsed = extractJsonLite(text)
   const organic = Array.isArray(parsed?.organic)
@@ -99,7 +110,7 @@ export async function qwenVideoSubmit(prompt, duration = 5) {
     body: JSON.stringify({
       model: QWEN_MODELS.video,
       input: { prompt },
-      parameters: { size: '1280*720', duration: Math.min(Number(duration) || 5, 5), prompt_extend: true },
+      parameters: { size: '1280*720', duration: Math.min(Number(duration) || 15, 15), prompt_extend: true },
     }),
     signal: AbortSignal.timeout(30000),
   })
@@ -126,4 +137,24 @@ export async function qwenVideoPoll(taskId) {
   }
   const failed = ['failed', 'canceled', 'unknown'].includes(status)
   return { status, videoUrl: null, posterUrl: null, failed, message: failed ? (data.message || out.message || status) : '' }
+}
+
+// Voice (TTS) via Qwen's OpenAI-compatible audio endpoint. Returns a data URL the
+// browser can play immediately — no asset is ever stored on our side.
+export async function qwenTTS(text, voice = QWEN_MODELS.ttsVoice) {
+  requireKey()
+  const input = String(text || '').trim()
+  if (!input) throw new Error('TTS text is empty')
+
+  const res = await fetch(`${QWEN_BASE}/audio/speech`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
+    body: JSON.stringify({ model: QWEN_MODELS.voice, input, voice, response_format: 'mp3' }),
+    signal: AbortSignal.timeout(120000),
+  })
+  if (!res.ok) throw new Error(`Qwen TTS failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
+
+  const bytes = Buffer.from(await res.arrayBuffer())
+  if (!bytes.length) throw new Error('Qwen TTS returned empty audio')
+  return { dataUrl: `data:audio/mp3;base64,${bytes.toString('base64')}`, bytes: bytes.length }
 }

@@ -239,13 +239,15 @@ export async function fetchStudioScript(symbol) {
   return res.json()
 }
 
-// POST /api/proxy/studio/image → Qwen image; live-data art card fallback
+// POST /api/proxy/studio/image → Qwen image (wan2.7-image). The prompt is built
+// behind the scenes from the live verdict — the user only sees CTA → result → download.
 export async function generateStudioImage(script) {
   const symbol = script?.symbol || 'TOKEN'
   const verdict = script?.verdict || 'HOLD'
-  const accent = verdict === 'BUY' ? '#34d399' : verdict === 'AVOID' ? '#f87171' : '#5b93ff'
-  const motif = script?.artDirection?.motif || 'premium fintech lighting'
-  const prompt = `A premium dark glassmorphism financial dashboard card, deep navy #020208 background, blue accent #5b93ff glow. Center: large bold "${symbol}" text with verdict badge "${verdict}" in ${accent}. Motif: ${motif}. Bottom: "VERDICT · AI INTELLIGENCE" watermark. Style: clean, professional, no clutter, motion blur glow effects, 800x450.`
+  const confidence = script?.confidence ?? 50
+  const bull = script?.bullScore ?? 50
+  const bear = script?.bearScore ?? 50
+  const prompt = `A clean, professional crypto analysis result card rendered as a dark glassmorphism financial dashboard. Deep navy background with a soft blue glow and a subtle grid. Large bold "${symbol}" ticker, a "${verdict}" verdict badge, confidence ${confidence}%, bull case ${bull} vs bear case ${bear}. Minimal, premium fintech aesthetic, crisp typography, balanced composition, no clutter.`
 
   try {
     const res = await fetch('/api/proxy/studio/image', {
@@ -256,7 +258,7 @@ export async function generateStudioImage(script) {
 
     if (res.ok) {
       const data = await res.json()
-      const imageUrl = data?.data?.[0]?.image_url || data?.image_url
+      const imageUrl = data?.data?.[0]?.image_url || data?.image_url || data?.url
       if (imageUrl) return { url: imageUrl, format: 'png' }
     }
   } catch (err) {
@@ -267,40 +269,37 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → Qwen video model async task: POST /video submits, GET /video/status/:id polls.
-// Polling lives in the browser so no single request ever hits the platform timeout.
-// If the render service is unavailable, a motion card is rendered locally from the
-// live verdict data so the studio never dead-ends.
+// Video → Qwen video model (happyhorse-1.1-r2v) async task: POST /video submits,
+// GET /video/status/:id polls. Prompt is built behind the scenes — a realistic crypto
+// analyst at his desk delivering the analysis, never motion graphics.
 export async function generateStudioVideo(script, onStatus) {
   const symbol = script?.symbol || 'TOKEN'
   const verdict = script?.verdict || 'HOLD'
-  const prompt = `A 12-second motion graphics video for ${symbol} crypto analysis. Scene 1 (0-4s): "${symbol}" logo reveal with ${verdict} badge animation. Scene 2 (4-8s): Price chart motion with confidence bar filling. Scene 3 (8-12s): Top bull and bear arguments as text cards sliding in. End frame: "VERDICT · Share this analysis". Style: dark glassmorphism, blue accent #5b93ff, professional.`
+  const confidence = script?.confidence ?? 50
+  const prompt = `A realistic short video of a professional crypto analyst sitting at a clean, modern trading desk with a subtle monitor glow behind him. He looks directly into the camera and calmly delivers a confident market analysis. Text overlay at the bottom: "${symbol} — ${verdict} (${confidence}% confidence)". Cinematic lighting, shallow depth of field, realistic skin and fabric, professional and trustworthy tone. No motion graphics, no cartoons, no text-transition-only frames — a real person talking.`
 
   try {
     onStatus?.('Submitting render job…')
     const res = await fetch('/api/proxy/studio/video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, duration: 12 }),
+      body: JSON.stringify({ prompt, duration: 15 }),
     })
 
     if (res.ok) {
       const submitted = await res.json()
 
-      // If the upstream returned the finished video inline, use it directly.
       if (!submitted.queued && (submitted.videoUrl || submitted.posterUrl)) {
         return {
           poster: submitted.posterUrl || submitted.videoUrl,
           videoUrl: submitted.videoUrl,
-          duration: 12,
+          duration: 15,
           resolution: '720p',
           format: 'mp4',
         }
       }
 
       if (submitted.task_id) {
-        // Poll the task status from the browser: every 4s, up to ~6 minutes
-        // (a 12s 720p clip measures ~2.5 min end to end).
         onStatus?.('Render queued — generating frames…')
         for (let i = 0; i < 90; i++) {
           await wait(4000)
@@ -316,7 +315,7 @@ export async function generateStudioVideo(script, onStatus) {
             return {
               poster: status.posterUrl || status.videoUrl,
               videoUrl: status.videoUrl,
-              duration: 12,
+              duration: 15,
               resolution: '720p',
               format: 'mp4',
             }
@@ -334,22 +333,42 @@ export async function generateStudioVideo(script, onStatus) {
   return verdictMotionWebm(script, onStatus)
 }
 
-// Voice — browser TTS speaking the REAL analysis script produced for this token
+// Voice → real Qwen TTS (qwen-audio-3.0-tts-plus). The prompt/script is condensed
+// behind the scenes on the server; the browser only ever receives the finished MP3.
 export async function generateStudioVoice(script, { onProgress } = {}) {
-  const voiceScript = String(script?.script || '').trim() ||
-    `VERDICT analysis for ${script?.symbol || 'this token'}. Current verdict: ${script?.verdict || 'HOLD'}. Confidence: ${script?.confidence || 70}%. This is not financial advice. Trade the evidence, not the noise.`
+  const symbol = script?.symbol || 'TOKEN'
+  const verdict = script?.verdict || 'HOLD'
+  const tone = script?.tone || 'neutral'
+  const text = String(script?.script || '')
 
-  for (let p = 0; p <= 100; p += 10) {
-    onProgress?.(p)
-    await wait(60)
+  onProgress?.(8)
+
+  const res = await fetch('/api/proxy/studio/voice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, symbol, verdict, tone }),
+  })
+
+  onProgress?.(82)
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Voice generation failed')
   }
 
+  const data = await res.json()
+  if (!data.audioUrl) throw new Error('Voice model returned no audio')
+
+  onProgress?.(100)
+
   return {
-    script: voiceScript,
-    tone: script?.tone || 'neutral',
-    duration: Number(script?.duration) || Math.max(30, Math.round(voiceScript.split(/\s+/).length / 2.5)),
-    format: 'tts',
-    credits: 0,
+    script: data.script,
+    audioUrl: data.audioUrl,
+    duration: data.duration,
+    format: data.format || 'mp3',
+    tone: data.tone || tone,
+    symbol: data.symbol || symbol,
+    verdict: data.verdict || verdict,
   }
 }
 

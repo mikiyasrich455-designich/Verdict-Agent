@@ -1,6 +1,6 @@
 // Studio · Image — generates art via Qwen image model
 import { useState } from 'react'
-import { ImageIcon, Wand2, RefreshCw, Palette } from 'lucide-react'
+import { ImageIcon, Wand2, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import VerdictBadge, { verdictColor } from '../../components/VerdictBadge'
@@ -89,24 +89,15 @@ function ImageStudioInner({ token, pick }) {
       </PageHeader>
 
       <div className="grid lg:grid-cols-5 gap-4">
-        {/* art direction */}
-        <Panel title="Art Direction" icon={Palette} delay={0.08} className="lg:col-span-2">
+        {/* image brief — prompt is generated behind the scenes, never shown here */}
+        <Panel title="Image Brief" icon={Wand2} delay={0.08} className="lg:col-span-2">
           <div className="space-y-4">
             <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-2">Palette</p>
-              <div className="flex gap-2">
-                {script.artDirection.palette.map((c) => (
-                  <span key={c} className="w-9 h-9 rounded-lg border border-white/10" style={{ background: c, boxShadow: `0 0 16px ${c}44` }} />
-                ))}
-              </div>
+              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Concept</p>
+              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Clean, professional analysis result card for the verdict</p>
             </div>
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Motif</p>
-              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">{script.artDirection.motif}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Narration tone</p>
-              <p className="text-[12.5px] text-muted break-words">{script.tone}</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="glass-chip">1:1 · 1024px</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>

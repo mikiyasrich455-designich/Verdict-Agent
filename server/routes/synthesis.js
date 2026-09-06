@@ -11,7 +11,7 @@ import {
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
 import { resolveCaInBody } from '../lib/caGuard.js'
-import { callLLM, callSearch } from '../lib/llm.js'
+import { callLLM, callSearch, QWEN_MODELS } from '../lib/llm.js'
 
 const router = Router()
 
@@ -92,6 +92,19 @@ async function deepAnalyze(symbol, live = null) {
   const tech = ryoData.technical_analysis || {}
   const intel = ryoData.intelligence || {}
 
+  // Live resolver numbers win over RYO's qualitative layer — this is what makes BTC,
+  // SOL and native coins show real price/cap/volume instead of a zero-fallback.
+  const livePrice = Number(live?.priceUsd) || 0
+  const liveChange = Number(live?.change24h)
+  const liveCap = Number(live?.marketCap) || 0
+  const liveVol = Number(live?.volume24h) || 0
+  const liveLiq = Number(live?.liquidityUsd) || 0
+
+  const priceUsd = livePrice > 0 ? livePrice : (market.price_usd || 0)
+  const change24h = Number.isFinite(liveChange) ? liveChange : (perf.change_24h_pct || 0)
+  const marketCapUsd = liveCap > 0 ? liveCap : (market.market_cap_usd || 0)
+  const volume24hUsd = liveVol > 0 ? liveVol : (market.volume_24h_usd || 0)
+
   const serpText = serpData?.map(r => {
     const title = r.title || r.snippet || ''
     const snippet = r.snippet || ''
@@ -104,12 +117,13 @@ async function deepAnalyze(symbol, live = null) {
 SYMBOL: ${symbolUpper}
 NAME: ${asset.name || symbolUpper}
 ${live?.ca ? `EXACT TOKEN IDENTITY: contract ${live.ca} on ${live.chainLabel || live.chain || 'resolved chain'}. Analyze ONLY this exact token — never substitute another coin, ticker or chain.` : 'IDENTITY: resolve strictly by the SYMBOL above — never substitute another coin, ticker or chain.'}
-CURRENT PRICE: $${(market.price_usd || 0).toLocaleString()}
-24H CHANGE: ${perf.change_24h_pct || 0}%
+CURRENT PRICE: $${priceUsd.toLocaleString()}
+24H CHANGE: ${change24h}%
 7D CHANGE: ${perf.change_7d_pct || 0}%
 30D MOMENTUM: ${perf.momentum_30d_pct || 0}%
-MARKET CAP: $${(market.market_cap_usd / 1e6).toFixed(1)}M
-24H VOLUME: $${(market.volume_24h_usd / 1e6).toFixed(1)}M
+MARKET CAP: $${(marketCapUsd / 1e6).toFixed(1)}M
+24H VOLUME: $${(volume24hUsd / 1e6).toFixed(1)}M
+${liveLiq > 0 ? `LIQUIDITY: $${(liveLiq / 1e6).toFixed(1)}M\n` : ''}${live?.buys24h != null ? `24H TAPE: ${live.buys24h || 0} buys / ${live.sells24h || 0} sells\n` : ''}${live?.pairAgeDays != null ? `POOL AGE: ${Number(live.pairAgeDays).toFixed(0)} days\n` : ''}
 
 TECHNICAL INDICATORS:
 - RSI(14): ${tech.rsi_14 || 'N/A'}
@@ -181,8 +195,8 @@ IMPORTANT RULES:
   return {
     symbol: symbolUpper,
     name: asset.name || symbolUpper,
-    priceUsd: market.price_usd || 0,
-    change24h: perf.change_24h_pct || 0,
+    priceUsd,
+    change24h,
     bullScore: clampScore(firstNum(analysis.bullScore, analysis.bull_score)),
     bearScore: clampScore(firstNum(analysis.bearScore, analysis.bear_score)),
     verdict: ['BUY', 'HOLD', 'AVOID'].includes(String(analysis.verdict || '').toUpperCase())
@@ -531,11 +545,11 @@ async function runCouncil(symbol, live) {
     callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 120-180 words. Cite specific numbers from the pack.` },
-    ], undefined, 1400).catch(() => ''),
+    ], QWEN_MODELS.bull, 1400).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 120-180 words. Cite specific numbers from the pack.` },
-    ], undefined, 1400).catch(() => ''),
+    ], QWEN_MODELS.bear, 1400).catch(() => ''),
   ])
   const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
   const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
@@ -545,11 +559,11 @@ async function runCouncil(symbol, live) {
     callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], undefined, 1200).catch(() => ''),
+    ], QWEN_MODELS.bull, 1200).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], undefined, 1200).catch(() => ''),
+    ], QWEN_MODELS.bear, 1200).catch(() => ''),
   ])
   const bullRebut = String(bullRebutRes || '').trim() || bullOpen
   const bearRebut = String(bearRebutRes || '').trim() || bearOpen
@@ -570,12 +584,12 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
   let judge = extractJson(await callLLM([
     { role: 'system', content: JUDGE_ROLE },
     { role: 'user', content: judgePrompt },
-  ], undefined, 1600).catch(() => ''))
+  ], QWEN_MODELS.judge, 1600).catch(() => ''))
   if (!judge) {
     judge = extractJson(await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: judgePrompt },
-    ], undefined, 1600).catch(() => ''))
+    ], QWEN_MODELS.judge, 1600).catch(() => ''))
   }
 
   const bull100 = clampScore(firstNum(judge?.bullScore))

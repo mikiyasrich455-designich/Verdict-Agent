@@ -29,6 +29,17 @@ const BASE58_CA_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 const CA_IN_URL_RE = /(?:token|coin|address|pair|pools?)\/(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})/i
 const TICKER_RE = /^[A-Za-z][A-Za-z0-9.$_-]{0,11}$/
 
+// Native major coins live on CoinGecko (not on DEX indexers), so a bare "BTC" or
+// "SOL" resolves here with real price/cap/volume instead of a zero-fallback.
+const MAJOR_COINS = {
+  BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', BNB: 'binancecoin', XRP: 'ripple',
+  ADA: 'cardano', DOGE: 'dogecoin', AVAX: 'avalanche-2', LINK: 'chainlink',
+  MATIC: 'matic-network', POL: 'matic-network', DOT: 'polkadot', LTC: 'litecoin',
+  ATOM: 'cosmos', UNI: 'uniswap', NEAR: 'near', APT: 'aptos', SUI: 'sui',
+  TRX: 'tron', TON: 'the-open-network', SHIB: 'shiba-inu', PEPE: 'pepe',
+  INJ: 'injective', ARB: 'arbitrum', OP: 'optimism', FIL: 'filecoin',
+}
+
 // Reverse of marketData's GT slug map — only used when GeckoTerminal is the
 // first source to see the token and we need a human chain name back.
 const GT_SLUG_TO_CHAIN = {
@@ -647,6 +658,63 @@ async function hydrate(profile, candidates) {
   return profile
 }
 
+// Native major coin — CoinGecko carries the real quote for BTC/ETH/SOL etc.
+async function majorCoinProfile(symbol) {
+  const id = MAJOR_COINS[String(symbol || '').toUpperCase()]
+  if (!id) return null
+  const coin = await cgCoin(id)
+  if (!coin?.id) return null
+
+  const md = coin.market_data || {}
+  const links = coin.links || {}
+  const profile = {
+    symbol: cleanSymbol(coin.symbol) || symbol.toUpperCase(),
+    name: coin.name || symbol,
+    chain: null,
+    chainLabel: null,
+    ca: null,
+    isCA: false,
+    priceUsd: num(md.current_price?.usd),
+    change24h: num(md.price_change_percentage_24h),
+    marketCap: num(md.market_cap?.usd),
+    fdv: num(md.fully_diluted_valuation?.usd),
+    volume24h: num(md.total_volume?.usd),
+    liquidityUsd: 0,
+    exchange: null,
+    logo: coin.image?.large || coin.image?.small || null,
+    banner: null,
+    description: (coin.description && coin.description.en) || null,
+    categories: Array.isArray(coin.categories) ? coin.categories.filter(Boolean).slice(0, 6) : [],
+    socials: [],
+    websites: [],
+    website: (links.homepage || []).find(Boolean) || null,
+    explorer: (links.blockchain_site || []).find(Boolean) || null,
+    twitter: links.twitter_screen_name ? `https://x.com/${links.twitter_screen_name}` : null,
+    cgCoinId: coin.id,
+    cgUrl: `https://www.coingecko.com/en/coins/${coin.id}`,
+    cgRank: coin.market_cap_rank || null,
+    watchers: num(coin.watchlist_portfolio_users) || null,
+    ath: num(md.ath?.usd),
+    athChangePct: num(md.ath_change_percentage?.usd),
+    atl: num(md.atl?.usd),
+    circulatingSupply: num(md.circulating_supply),
+    totalSupply: num(md.total_supply),
+    marketCapFdvRatio: num(md.market_cap_fdv_ratio),
+    priceHistory: [],
+    resolved: true,
+    matchType: 'coingecko_major',
+  }
+
+  const chart = await cgMarketChart(coin.id, 7)
+  const prices = chart?.prices || []
+  if (prices.length > 3) {
+    const slice = prices.slice(-32)
+    profile.priceHistory = slice.map(([t, price], i) => ({ i, t: Number(t) || 0, price: Number(price) || 0, volume: 0 }))
+    profile.chartSource = 'live history · last 7 days'
+  }
+  return profile
+}
+
 /**
  * Resolve ANY user input to a real, fully-enriched token identity.
  *   "GEuuz…pump" / "0x…" / a explorer URL → that exact token, on its exact chain
@@ -702,7 +770,19 @@ export async function resolveToken(rawInput) {
     throw new Error(`No live market found for ${shortAddr(ca)} — check the contract address and try again.`)
   }
 
-  // ── 2. Ticker or token name — search live, disambiguate by liquidity ──
+  // ── 2. Native major coin — BTC/ETH/SOL etc. resolve straight to CoinGecko ──
+  {
+    const ticker = raw.replace(/^[$￥]+/, '').toUpperCase()
+    if (TICKER_RE.test(ticker) && MAJOR_COINS[ticker]) {
+      const major = await majorCoinProfile(ticker)
+      if (major) {
+        setCache(cacheKey, major, 3 * 60 * 1000)
+        return major
+      }
+    }
+  }
+
+  // ── 3. Ticker or token name — search live, disambiguate by liquidity ──
   const query = raw.replace(/^[$￥]+/, '')
   const pairs = (await dexSearch(query)) || []
   const groups = groupPairs(pairs)
@@ -725,7 +805,7 @@ export async function resolveToken(rawInput) {
     return out
   }
 
-  // ── 3. Nothing live — plain ticker passes through unverified for RYO ──
+  // ── 4. Plain ticker with no live DEX pair — zero fallback (major coins already tried) ──
   if (TICKER_RE.test(raw)) {
     const out = {
       symbol: cleanSymbol(raw) || upper,
