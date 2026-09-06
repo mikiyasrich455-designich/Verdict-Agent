@@ -1,7 +1,7 @@
 // Narrative agent — the Multi-KOL Narrative spotlight.
 // Tracks KOL voices, flags convergence, and stamps every news item
 // VERIFIED / UNVERIFIED / CONTRADICTED against on-chain evidence.
-import { Radio, RefreshCw, Newspaper, Users, Target } from 'lucide-react'
+import { Radio, RefreshCw, Newspaper, Users } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
@@ -63,10 +63,17 @@ function KolCard({ k, delay }) {
             )}
           </div>
         </div>
-        <StancePill stance={k.stance} />
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {k.impact && (
+            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${k.impact === 'HIGH' ? 'bg-warning/10 border-warning/30 text-warning' : 'bg-white/5 border-white/10 text-faint'}`}>
+              {k.impact}
+            </span>
+          )}
+          <StancePill stance={k.stance} />
+        </div>
       </div>
 
-      <p className="text-[12px] text-snow/75 leading-relaxed italic">"{k.quote}"</p>
+      <p className="text-[12px] text-snow/75 leading-relaxed">“{k.quote}”</p>
 
       <div className="flex items-center justify-between gap-3 mt-3 pt-2.5 border-t border-white/5">
         <div className="flex-1">
@@ -92,6 +99,14 @@ function KolCard({ k, delay }) {
       </div>
     </div>
   )
+}
+
+function convergenceTone(status) {
+  const s = String(status || '').toUpperCase()
+  if (s.includes('BULLISH')) return 'text-success'
+  if (s.includes('BEARISH')) return 'text-danger'
+  if (s === 'COMPRESSION') return 'text-faint'
+  return 'text-warning'
 }
 
 export default function Narrative() {
@@ -149,25 +164,22 @@ export default function Narrative() {
 
       {/* headline stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Stat label="Voices Tracked" value={d.total} sub="KOLs in the sweep" delay={0.02} />
-        <Stat label="Bullish" value={d.bullish} sub={`of ${d.total} voices`} tone="text-success" delay={0.06} />
-        <Stat label="Bearish" value={d.total - d.bullish} sub="incl. neutrals" tone="text-danger" delay={0.1} />
+        <Stat label="Voices Tracked" value={d.voices_tracked ?? d.total ?? 0} sub="unique accounts in sweep" delay={0.02} />
+        <Stat label="Bullish" value={d.bullish_voices ?? d.bullish ?? 0} sub="macro upward conviction" tone="text-success" delay={0.06} />
+        <Stat label="Bearish" value={d.bearish_voices ?? 0} sub="fear / doubt / distribution" tone="text-danger" delay={0.1} />
         <Stat
           label="Convergence"
-          value={d.converged ? <span className="text-success">CONVERGED</span> : <span className="text-warning">CONFLICTED</span>}
-          sub={d.converged ? 'majority aligns bullish' : 'no clear consensus'}
+          value={<span className={convergenceTone(d.convergence_status)}>{d.convergence_status || 'COMPRESSION'}</span>}
+          sub="narrative consensus"
           delay={0.14}
         />
       </div>
 
-      {/* convergence banner */}
-      <div className={`glass-panel !py-3.5 !px-5 mb-4 flex items-center gap-3 ${d.converged ? 'border-success/25' : 'border-warning/25'}`}>
-        <Target size={16} className={d.converged ? 'text-success' : 'text-warning'} />
-        <p className="text-[12.5px] text-snow/85">
-          {d.converged
-            ? `${d.bullish}/${d.total} voices lean the same way — narrative convergence is a momentum accelerant, and a reversal accelerant when it breaks.`
-            : 'Voices are split — the narrative has not converged. Expect chop until one side capitulates.'}
-        </p>
+      {/* sovereign narrative banner */}
+      <div className="glass-panel !p-4 mb-4 border-accent/20">
+        <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Narrative headline</p>
+        <p className="text-[14px] text-snow/90 font-semibold leading-snug break-words">{d.narrative_headline}</p>
+        <p className="text-[12px] text-snow/70 leading-relaxed mt-2 break-words">{d.sentiment_summary_text}</p>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4">

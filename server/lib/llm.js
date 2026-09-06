@@ -20,10 +20,10 @@ export const QWEN_MODELS = {
   bull: process.env.QWEN_BULL_MODEL || 'qwen3.6-flash',
   bear: process.env.QWEN_BEAR_MODEL || 'deepseek-v4-flash-0731',
   judge: process.env.QWEN_JUDGE_MODEL || 'qwen3.7-plus',
-  // Studio media.
-  image: process.env.QWEN_IMAGE_MODEL || 'wan2.7-image',
-  video: process.env.QWEN_VIDEO_MODEL || 'happyhorse-1.1-r2v',
-  voice: process.env.QWEN_VOICE_MODEL || 'qwen-audio-3.0-tts-plus',
+  // Studio media — exact Qwen Cloud models.
+  image: process.env.QWEN_IMAGE_MODEL || 'wan2.7-image-pro',
+  video: process.env.QWEN_VIDEO_MODEL || 'wan3.0-text-to-video',
+  voice: process.env.QWEN_VOICE_MODEL || 'qwen3-tts-flash',
   ttsVoice: process.env.QWEN_TTS_VOICE || 'Ethan',
 }
 

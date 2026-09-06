@@ -1,7 +1,8 @@
-// KOL Discovery via Qwen live search + grounded LLM — real data from X, YouTube, News
-import { callLLM, callSearch } from './llm.js'
+// Sovereign KOL Sentiment & Social Intelligence Engine — real posts from live search,
+// synthesized into the console's narrative metrics. Noise/shills are filtered; alpha and
+// on-chain/structural commentary is weighted up. Output matches the console schema.
+import { callLLM, callSearch, QWEN_MODELS } from './llm.js'
 
-// ── Robust JSON extraction from LLM output ───────────────────────
 function extractJson(text) {
   if (!text) return null
   let t = String(text).trim()
@@ -15,138 +16,180 @@ function extractJson(text) {
   return null
 }
 
-// ── Discover real KOLs from X, YouTube, News ─────────────────────
-export async function discoverKols(symbol) {
-  const symbolUpper = symbol.toUpperCase()
-  console.log(`[KOLS] Discovering real KOLs for ${symbolUpper}...`)
+function platformOf(url) {
+  const u = String(url || '').toLowerCase()
+  if (u.includes('x.com') || u.includes('twitter.com')) return 'x'
+  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube'
+  if (u.includes('reddit.com')) return 'reddit'
+  if (u.includes('tiktok.com')) return 'tiktok'
+  if (u.includes('instagram.com')) return 'instagram'
+  return 'web'
+}
 
-  // 4 SERP queries targeting X, YouTube, and news
+export async function discoverKols(symbol) {
+  const symbolUpper = String(symbol || '').toUpperCase()
+  console.log(`[KOLS] Sovereign social sweep for ${symbolUpper}...`)
+
   const queries = [
     `site:x.com ${symbolUpper} crypto`,
-    `${symbolUpper} crypto twitter thread opinion`,
-    `${symbolUpper} crypto news`,
-    `${symbolUpper} crypto YouTube analysis`,
+    `${symbolUpper} crypto Twitter thread opinion`,
+    `${symbolUpper} crypto reddit discussion`,
+    `${symbolUpper} crypto news analysis`,
   ]
 
-  const allResults = []
+  const raw = []
   const serpRes = await Promise.allSettled(
-    queries.map(q => callSearch(q, 6).catch(e => {
+    queries.map((q) => callSearch(q, 8).catch((e) => {
       console.log('[KOLS] SERP failed for query:', q, e.message)
       return null
     }))
   )
 
   for (const r of serpRes) {
-    // Live search returns { organic: [...] } (top level) or { data: { organic: [...] } }
     const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
     if (organic && Array.isArray(organic)) {
-      allResults.push(...organic.slice(0, 6).map(item => ({
+      raw.push(...organic.slice(0, 8).map((item) => ({
         title: item.title || '',
         url: item.link || '',
         snippet: item.snippet || '',
-        position: item.position || 0,
-      })))
+      })).filter((x) => x.url))
     }
   }
 
-  // Deduplicate by URL
   const seen = new Set()
-  const unique = allResults.filter(r => {
-    if (!r.url || seen.has(r.url)) return false
+  const posts = raw.filter((r) => {
+    if (seen.has(r.url)) return false
     seen.add(r.url)
     return true
-  }).slice(0, 20)
+  }).slice(0, 24)
 
-  if (!unique.length) {
-    console.log('[KOLS] No SERP results found for', symbolUpper)
-    return { kols: [], news: [], total: 0, bullish: 0, converged: false }
+  if (!posts.length) {
+    console.log(`[KOLS] No live posts found for ${symbolUpper}`)
+    return emptyResult(symbolUpper)
   }
 
-  // Build allowed URL set for strict grounding validation
-  const allowedUrls = new Set(unique.map(r => r.url))
+  const allowedUrls = new Set(posts.map((p) => p.url))
+  const bundle = posts.map((p) => `- Title: ${p.title}\n  URL: ${p.url}\n  Snippet: ${p.snippet}`).join('\n')
 
-  // LLM extraction with STRICT grounding rule
-  const prompt = `You are a KOL (Key Opinion Leader) extraction engine.
+  const prompt = `You are the elite Sovereign KOL Sentiment & Social Intelligence Engine for the Verdict Agent Console. Analyze the live real-time feed of crypto social posts for the token below and synthesize high-impact, actionable market analytics.
 
-SYMBOL: ${symbolUpper}
+TOKEN: ${symbolUpper}
 
-TASK: Extract KOL voices from these search results. Return ONLY valid JSON with NO markdown, NO code fences.
+RAW SOCIAL POSTS / SEARCH RESULTS (use ONLY these — never invent handles, URLs, or numbers):
+${bundle}
 
-SEARCH RESULTS (use ONLY these URLs — never invent URLs not listed below):
-${unique.map(r => `- Title: ${r.title}\n  URL: ${r.url}\n  Snippet: ${r.snippet}`).join('\n')}
+CRITICAL NOISE & SHILL FILTERING RULES:
+1. Detect Engagement Farming: penalize hyper-promotional generic phrases ("100x soon!", "Drop your wallets", "To the moon"). Classify those as low-impact "shill noise".
+2. Reward Alpha & Technical Analysis: heavily weight posts about structural mechanics, on-chain smart-contract interactions, major wallet distributions, protocol partnerships, or verified developer updates.
+3. Quantify Conviction: for high-following accounts, note whether tone is Accumulation, holding steady, or Distribution.
 
-STRICT RULES:
-1. You MUST copy URLs EXACTLY as provided above — never modify, shorten, or fabricate URLs.
-2. Every KOL must link to a URL from the list above.
-3. Platform detection: x.com/twitter.com → "x", youtube.com/youtu.be → "youtube", reddit.com → "reddit", tiktok.com → "tiktok", instagram.com → "instagram", otherwise "web".
-4. Only include KOLs with meaningful commentary about ${symbolUpper}.
+DASHBOARD MAPPING:
+- voices_tracked: count of unique, relevant accounts in this sweep.
+- bullish_voices: count of unique voices with clear macro upward conviction.
+- bearish_voices: count of unique voices with fear, doubt, short bias, or distribution warnings.
+- convergence_status: strictly one of [BULLISH CONVERGENCE | BEARISH CONVERGENCE | CONFLICTED | COMPRESSION].
 
-RESPONSE FORMAT (exact keys):
+Respond with ONLY valid JSON (no markdown, no code fences, no prose) in this exact shape:
 {
-  "kols": [
-    {
-      "handle": "@username or Channel Name",
-      "name": "Display Name or 'Unknown'",
-      "platform": "x|youtube|reddit|tiktok|instagram|web",
-      "url": "EXACT URL FROM LIST ABOVE",
-      "quote": "Brief excerpt or summary of their ${symbolUpper} commentary (keep under 150 chars)",
-      "stance": "bullish|bearish|neutral",
-      "conviction": 65
-    }
-  ],
-  "news": [
-    {
-      "title": "News headline from search results",
-      "source": "Source name (e.g., 'CoinDesk', 'The Block')",
-      "url": "EXACT URL FROM LIST ABOVE",
-      "age": "e.g., '2h', '1d' (estimate from snippet if mentioned)"
-    }
+  "voices_tracked": 0,
+  "bullish_voices": 0,
+  "bearish_voices": 0,
+  "convergence_status": "STATUS_STRING",
+  "narrative_headline": "One clear sentence summarizing what the loudest voices are really saying right now",
+  "sentiment_summary_text": "A detailed two-sentence explanation of why the narrative has or has not converged, and what traders should expect next",
+  "top_voices_list": [
+    { "handle": "@username", "sentiment": "BULLISH", "impact_score": "HIGH", "alpha_takeaway": "Short, punchy summary of the exact technical/structural point this user made", "url": "EXACT URL copied from the RAW SOCIAL POSTS above" }
   ]
 }
-
-IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no explanation.`
+Every "url" in top_voices_list MUST be copied EXACTLY from the RAW SOCIAL POSTS list above — never invent or shorten it.`
 
   let response
   try {
     response = await callLLM([
       { role: 'system', content: 'You are a precise data extraction engine. Return ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: prompt },
-    ], undefined, 4000)
+    ], QWEN_MODELS.script, 3500)
   } catch (e) {
     console.log('[KOLS] LLM extraction failed:', e.message)
-    response = null
+    return emptyResult(symbolUpper)
   }
 
-  let extracted = extractJson(response)
+  const x = extractJson(response)
+  if (!x) return emptyResult(symbolUpper)
 
-  // Validate URLs are from allowed set (security/grounding check)
-  if (extracted?.kols) {
-    extracted.kols = extracted.kols.filter(k => {
-      if (!k.url || !allowedUrls.has(k.url)) {
-        console.log('[KOLS] Discarding KOL with ungrounded URL:', k.handle, k.url)
-        return false
+  const voices = (Array.isArray(x.top_voices_list) ? x.top_voices_list : [])
+    .filter((v) => v && (v.handle || v.alpha_takeaway))
+    .map((v) => {
+      const sentiment = ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(String(v.sentiment).toUpperCase())
+        ? String(v.sentiment).toUpperCase()
+        : 'NEUTRAL'
+      const impact = String(v.impact_score || '').toUpperCase() === 'HIGH' ? 'HIGH' : 'MEDIUM'
+      const url = allowedUrls.has(v.url) ? String(v.url) : ''
+      return {
+        handle: String(v.handle || '@unknown'),
+        sentiment,
+        impact_score: impact,
+        alpha_takeaway: String(v.alpha_takeaway || 'No structural point extracted.'),
+        platform: v.platform || platformOf(url),
+        url,
       }
-      return true
     })
+
+  const voices_tracked = Math.max(Number(x.voices_tracked) || 0, voices.length)
+  const bullish_voices = Math.max(0, Number(x.bullish_voices) || 0)
+  const bearish_voices = Math.max(0, Number(x.bearish_voices) || 0)
+  const convergence_status = String(x.convergence_status || 'COMPRESSION').toUpperCase()
+
+  const data = {
+    symbol: symbolUpper,
+    voices_tracked,
+    bullish_voices,
+    bearish_voices,
+    convergence_status,
+    narrative_headline: String(x.narrative_headline || 'No clear narrative headline emerged this sweep.'),
+    sentiment_summary_text: String(x.sentiment_summary_text || 'Insufficient high-signal posts to call convergence this sweep.'),
+    top_voices_list: voices,
+    news: posts.slice(0, 6).map((p) => ({
+      title: p.title,
+      source: platformOf(p.url),
+      url: p.url,
+      age: 'recent',
+    })),
+    // Legacy aliases for older UI paths.
+    kols: voices.map((v) => ({
+      handle: v.handle,
+      platform: v.platform || 'web',
+      url: v.url || null,
+      stance: v.sentiment.toLowerCase(),
+      quote: v.alpha_takeaway,
+      conviction: v.impact_score === 'HIGH' ? 84 : 58,
+      impact: v.impact_score,
+    })),
+    total: voices_tracked,
+    bullish: bullish_voices,
+    bearish: bearish_voices,
+    converged: convergence_status === 'BULLISH CONVERGENCE' || convergence_status === 'BEARISH CONVERGENCE',
   }
 
-  if (extracted?.news) {
-    extracted.news = extracted.news.filter(n => {
-      if (!n.url || !allowedUrls.has(n.url)) {
-        console.log('[KOLS] Discarding news with ungrounded URL:', n.title)
-        return false
-      }
-      return true
-    })
+  console.log(`[KOLS] ${voices_tracked} voices (${bullish_voices}B/${bearish_voices}S) · ${convergence_status}`)
+  return data
+}
+
+function emptyResult(symbolUpper) {
+  return {
+    symbol: symbolUpper,
+    voices_tracked: 0,
+    bullish_voices: 0,
+    bearish_voices: 0,
+    convergence_status: 'COMPRESSION',
+    narrative_headline: 'No high-signal social posts surfaced for this token yet.',
+    sentiment_summary_text: 'The sweep found insufficient real posts to call a narrative convergence. Re-sweep as fresh posts land.',
+    top_voices_list: [],
+    news: [],
+    kols: [],
+    total: 0,
+    bullish: 0,
+    bearish: 0,
+    converged: false,
   }
-
-  const kols = extracted?.kols || []
-  const news = extracted?.news || []
-  const bullish = kols.filter(k => k.stance === 'bullish').length
-  const total = kols.length
-  const converged = total > 0 && bullish >= Math.ceil(total / 2)
-
-  console.log(`[KOLS] Discovered ${total} KOLs (${bullish} bullish) and ${news.length} news items for ${symbolUpper}`)
-
-  return { kols, news, total, bullish, converged }
 }

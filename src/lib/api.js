@@ -269,14 +269,12 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → Qwen video model (happyhorse-1.1-r2v) async task: POST /video submits,
-// GET /video/status/:id polls. Prompt is built behind the scenes — a realistic crypto
-// analyst at his desk delivering the analysis, never motion graphics.
+// Video → Qwen video model (async task): POST /video submits, GET /video/status/:id polls.
+// Prompt is built behind the scenes — a realistic female news anchor delivering the
+// data-driven analysis for ~15s, never motion graphics.
 export async function generateStudioVideo(script, onStatus) {
   const symbol = script?.symbol || 'TOKEN'
-  const verdict = script?.verdict || 'HOLD'
-  const confidence = script?.confidence ?? 50
-  const prompt = `A realistic short video of a professional crypto analyst sitting at a clean, modern trading desk with a subtle monitor glow behind him. He looks directly into the camera and calmly delivers a confident market analysis. Text overlay at the bottom: "${symbol} — ${verdict} (${confidence}% confidence)". Cinematic lighting, shallow depth of field, realistic skin and fabric, professional and trustworthy tone. No motion graphics, no cartoons, no text-transition-only frames — a real person talking.`
+  const prompt = `A realistic 15-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
 
   try {
     onStatus?.('Submitting render job…')
