@@ -64,7 +64,7 @@ async function deepAnalyze(symbol, live = null) {
         }))
       )
       for (const r of results) {
-        // AceData SERP returns { organic: [...] } (top level) or { data: { organic: [...] } }
+        // Live search returns { organic: [...] } (top level) or { data: { organic: [...] } }
       const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
         if (organic && Array.isArray(organic)) {
           allResults.push(...organic.slice(0, 5).map(item => ({
@@ -155,7 +155,7 @@ IMPORTANT RULES:
 
   // Call the reasoning model for deep analysis
   console.log(`[DEEP] ${symbolUpper}: Calling reasoning model for analysis...`)
-  const tGrokStart = Date.now()
+  const tLlmStart = Date.now()
   let response = await callLLM([
     { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
     { role: 'user', content: prompt },
@@ -174,8 +174,8 @@ IMPORTANT RULES:
   if (!analysis) {
     throw new Error('Analysis response did not contain valid JSON')
   }
-  const grokTime = Date.now() - tGrokStart
-  console.log(`[DEEP] ${symbolUpper}: Grok response received in ${grokTime}ms`)
+  const llmTime = Date.now() - tLlmStart
+  console.log(`[DEEP] ${symbolUpper}: Reasoning response received in ${llmTime}ms`)
 
   // Validate and return (accepts nested {score,reasoning} or flat xxxScore/xxxReasoning keys)
   return {
@@ -204,7 +204,7 @@ IMPORTANT RULES:
     asOf: new Date().toISOString(),
     timing: {
       dataFetchMs: dataFetchTime,
-      grokMs: grokTime,
+      llmMs: llmTime,
       totalMs: Date.now() - t0,
     },
   }
@@ -266,8 +266,8 @@ function serpList(r) {
   return Array.isArray(organic) ? organic : []
 }
 
-// ── Live qualitative insights: SERP + Grok grounded in live numbers ──
-export async function grokLiveInsights(live) {
+// ── Live qualitative insights: search + LLM grounded in live numbers ──
+export async function liveInsights(live) {
   const sym = String(live?.symbol || '').toUpperCase()
   const name = live?.name || sym
 
@@ -387,7 +387,7 @@ Write the complete script now. No placeholders, no [pause], no instructions. Jus
 
 // ── Routes ───────────────────────────────────────────────────────
 
-// POST /api/proxy/synthesis/verdict → Deep forensic analysis (SERP + RYO + Grok)
+// POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + RYO + Qwen)
 router.post('/verdict', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -646,7 +646,7 @@ router.post('/council', async (req, res) => {
   }
 })
 
-// POST /api/proxy/synthesis/narrative → Real KOL discovery via SERP + Grok
+// POST /api/proxy/synthesis/narrative → Real KOL discovery via search + LLM
 router.post('/narrative', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -711,7 +711,7 @@ router.post('/risk', async (req, res) => {
   }
 })
 
-// POST /api/proxy/synthesis/script → Single Grok call: analysis + script (no double call)
+// POST /api/proxy/synthesis/script → Single LLM call: analysis + script (no double call)
 router.post('/script', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
@@ -732,7 +732,7 @@ router.post('/script', async (req, res) => {
       return res.json(cached)
     }
 
-    // Reuse deepAnalyze (now parallel SERP) — single Grok call for analysis
+    // Reuse deepAnalyze (now parallel research) — single LLM call for analysis
     console.log('[SCRIPT] Running parallel analysis (RYO + SERP)...')
     const verdictData = await deepAnalyze(symbol, req.tokenIdentity)
 

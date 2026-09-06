@@ -1,4 +1,4 @@
-// Studio · Image — generates art via Seedream (AceData, cheapest & best)
+// Studio · Image — generates art via Qwen image model
 import { useState } from 'react'
 import { ImageIcon, Wand2, RefreshCw, Palette } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'

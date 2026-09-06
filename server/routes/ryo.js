@@ -17,7 +17,7 @@ import {
   withLiveIdentity,
 } from '../lib/normalizers.js'
 import { discoverKols } from '../lib/kolDiscovery.js'
-import { grokLiveInsights } from './synthesis.js'
+import { liveInsights } from './synthesis.js'
 import { resolveCaInBody, resolveCaInList } from '../lib/caGuard.js'
 import { shortAddr } from '../lib/tokenResolver.js'
 
@@ -153,11 +153,11 @@ router.post('/analyze_token', async (req, res) => {
       data = profileFromLive(live)
     }
 
-    // Upgrade the qualitative layer with SERP + Grok research grounded in the
+    // Upgrade the qualitative layer with live search + LLM research grounded in the
     // live contract data — every CA gets real AI analysis, never templates.
     if (live && data?.qualitative === 'derived') {
       try {
-        const insights = await grokLiveInsights(live)
+        const insights = await liveInsights(live)
         if (insights) {
           data.catalysts = insights.catalysts
           data.risks = insights.risks
@@ -285,7 +285,7 @@ router.post('/sentiment_shift', async (req, res) => {
   }
 })
 
-// POST /api/proxy/ryo/narrative — Real KOL discovery via SERP + Grok
+// POST /api/proxy/ryo/narrative — Real KOL discovery via search + LLM
 router.post('/narrative', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body

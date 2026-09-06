@@ -1,5 +1,5 @@
 // Live API layer — calls the Express proxy at /api/proxy/*
-// The proxy holds all API keys (RYO, AceData) and never exposes them to the browser.
+// The proxy holds all API keys (RYO, Qwen) and never exposes them to the browser.
 // Every function keeps the same signature the UI expects.
 
 import { identityForSymbol } from './activeToken'
@@ -59,7 +59,7 @@ export const ANALYSIS_STEPS = [
   'Building the verdict…',
 ]
 
-// POST /api/proxy/synthesis/verdict → Deep forensic analysis (SERP + RYO + Grok)
+// POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + RYO + Qwen)
 // Backend now parallelizes RYO + 3x SERP queries (was sequential = 9-15s)
 export async function fetchVerdict(symbol, onStep) {
   try {
@@ -239,7 +239,7 @@ export async function fetchStudioScript(symbol) {
   return res.json()
 }
 
-// POST /api/proxy/acedata/image → AceData image models first; live-data art card fallback
+// POST /api/proxy/studio/image → Qwen image; live-data art card fallback
 export async function generateStudioImage(script) {
   const symbol = script?.symbol || 'TOKEN'
   const verdict = script?.verdict || 'HOLD'
@@ -248,7 +248,7 @@ export async function generateStudioImage(script) {
   const prompt = `A premium dark glassmorphism financial dashboard card, deep navy #020208 background, blue accent #5b93ff glow. Center: large bold "${symbol}" text with verdict badge "${verdict}" in ${accent}. Motif: ${motif}. Bottom: "VERDICT · AI INTELLIGENCE" watermark. Style: clean, professional, no clutter, motion blur glow effects, 800x450.`
 
   try {
-    const res = await fetch('/api/proxy/acedata/image', {
+    const res = await fetch('/api/proxy/studio/image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, size: '1:1' }),
@@ -267,7 +267,7 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → AceData video model async task: POST /video submits, GET /video/status/:id polls.
+// Video → Qwen video model async task: POST /video submits, GET /video/status/:id polls.
 // Polling lives in the browser so no single request ever hits the platform timeout.
 // If the render service is unavailable, a motion card is rendered locally from the
 // live verdict data so the studio never dead-ends.
@@ -278,7 +278,7 @@ export async function generateStudioVideo(script, onStatus) {
 
   try {
     onStatus?.('Submitting render job…')
-    const res = await fetch('/api/proxy/acedata/video', {
+    const res = await fetch('/api/proxy/studio/video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, duration: 12 }),
@@ -305,7 +305,7 @@ export async function generateStudioVideo(script, onStatus) {
         for (let i = 0; i < 90; i++) {
           await wait(4000)
 
-          const statusRes = await fetch(`/api/proxy/acedata/video/status/${encodeURIComponent(submitted.task_id)}`)
+          const statusRes = await fetch(`/api/proxy/studio/video/status/${encodeURIComponent(submitted.task_id)}`)
           const status = await statusRes.json().catch(() => ({}))
 
           const secs = (i + 1) * 4

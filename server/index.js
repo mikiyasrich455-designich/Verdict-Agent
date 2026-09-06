@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import ryoRoutes from './routes/ryo.js'
-import aceRoutes from './routes/acedata.js'
+import studioRoutes from './routes/studio.js'
 import synthesisRoutes from './routes/synthesis.js'
 import resolveRoutes from './routes/resolve.js'
 import { log } from './lib/logger.js'
@@ -51,7 +51,7 @@ app.post('/test-post', (req, res) => {
 
 // API routes
 app.use('/api/proxy/ryo', ryoRoutes)
-app.use('/api/proxy/acedata', aceRoutes)
+app.use('/api/proxy/studio', studioRoutes)
 app.use('/api/proxy/synthesis', synthesisRoutes)
 app.use('/api/proxy/resolve', resolveRoutes)
 
@@ -82,6 +82,6 @@ process.on('uncaughtException', (err) => {
 app.listen(PORT, () => {
   console.log(`[VERDICT] Server running on http://localhost:${PORT}`)
   console.log(`[VERDICT] RYO routes: /api/proxy/ryo/*`)
-  console.log(`[VERDICT] AceData routes: /api/proxy/acedata/*`)
+  console.log(`[VERDICT] Studio routes: /api/proxy/studio/*`)
   console.log(`[VERDICT] Synthesis routes: /api/proxy/synthesis/*`)
 })

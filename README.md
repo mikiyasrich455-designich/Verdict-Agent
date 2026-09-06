@@ -23,8 +23,7 @@ All data is **live and real-time** from the following third-party APIs:
 | Service | Purpose | Disclosure |
 |---------|---------|------------|
 | [RYO MCP API](https://app-ryochan.com) | Token analysis, market data, sentiment, scanning, comparison, narrative, risk | Primary data source. All prices, market caps, volumes, sentiment scores, catalysts, and risks come directly from RYO's real-time API endpoints. |
-| [Qwen (Alibaba Cloud)](https://qwen.ai) | Verdict synthesis, debate generation, narrative analysis | AI reasoning layer. Generates verdicts, debate transcripts, and narrative summaries from RYO data. |
-| [AceData Cloud](https://acedata.cloud) | Image generation (Seedream/Flux), video generation (Seedance) | Media generation. Produces verdict cards and motion graphics. |
+| [Qwen (Alibaba Cloud)](https://qwen.ai) | Verdict synthesis, debate, narrative, image generation, video generation | AI layer. Qwen-flash reasoning + live web search, qwen-image, wanx video. Produces verdicts, debate transcripts, narratives, verdict cards and motion graphics. |
 | [CoinGecko](https://coingecko.com) | Token logos | CDN-hosted token icons. |
 
 **No mock, fake, or simulated data is presented as real.** All financial data (prices, market caps, volumes, sentiment) is fetched from live API endpoints. The only local data stored is user receipt history in `localStorage`.
@@ -50,7 +49,7 @@ Frontend (Vite + React)          Backend (Express)
 ┌─────────────────────┐          ┌──────────────────────┐
 │  Dashboard Pages    │  /api/   │  Proxy Server        │
 │  - Token Analysis   │ ──────►  │  - /ryo/*            │
-│  - Deep Analysis    │          │  - /acedata/*        │
+│  - Deep Analysis    │          │  - /studio/*         │
 │  - Compare          │          │  - /synthesis/*      │
 │  - Market Overview  │          └──────────┬───────────┘
 │  - Scout            │                     │
@@ -81,8 +80,10 @@ npm run dev:full
 Environment variables go in `server/.env`:
 - `RYO_MCP_BASE` — RYO API base URL
 - `RYO_MCP_KEY` — RYO API key
-- `ACEDATA_KEY` — AceData API key
-- `ACEDATA_BASE` — AceData API base URL
+- `QWEN_KEY` — Qwen (DashScope intl) pay-as-you-go API key
+- `QWEN_CHAT_MODEL` — optional (default `qwen-flash`)
+- `QWEN_IMAGE_MODEL` — optional (default `qwen-image-2.0`)
+- `QWEN_VIDEO_MODEL` — optional (default `wanx2.1-t2v-turbo`)
 
 ## Deployment
 

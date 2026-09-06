@@ -1,4 +1,4 @@
-// Studio · Video — generates a motion clip via Seedance (AceData)
+// Studio · Video — generates a motion clip via Qwen video model
 import { useState } from 'react'
 import { Video, Clapperboard, RefreshCw, Film } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'

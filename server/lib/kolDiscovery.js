@@ -37,7 +37,7 @@ export async function discoverKols(symbol) {
   )
 
   for (const r of serpRes) {
-    // AceData SERP returns { organic: [...] } (top level) or { data: { organic: [...] } }
+    // Live search returns { organic: [...] } (top level) or { data: { organic: [...] } }
     const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
     if (organic && Array.isArray(organic)) {
       allResults.push(...organic.slice(0, 6).map(item => ({
@@ -65,7 +65,7 @@ export async function discoverKols(symbol) {
   // Build allowed URL set for strict grounding validation
   const allowedUrls = new Set(unique.map(r => r.url))
 
-  // Grok extraction with STRICT grounding rule
+  // LLM extraction with STRICT grounding rule
   const prompt = `You are a KOL (Key Opinion Leader) extraction engine.
 
 SYMBOL: ${symbolUpper}
@@ -113,7 +113,7 @@ IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no explanat
       { role: 'user', content: prompt },
     ], undefined, 4000)
   } catch (e) {
-    console.log('[KOLS] Grok extraction failed:', e.message)
+    console.log('[KOLS] LLM extraction failed:', e.message)
     response = null
   }
 

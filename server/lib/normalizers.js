@@ -391,7 +391,7 @@ export function applyLiveData(base, live) {
     profile.aiLayer = base ? 'Live market structure' : null
     profile.aiNote = null
     // Flag for the route layer: the qualitative layer is deterministic and can be
-    // upgraded with SERP + Grok research grounded in this live contract.
+    // upgraded with live search + LLM research grounded in this live contract.
     profile.qualitative = 'derived'
   }
   return profile

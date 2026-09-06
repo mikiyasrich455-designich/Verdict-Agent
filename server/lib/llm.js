@@ -1,8 +1,6 @@
-// Unified AI backend — Qwen (DashScope intl, pay-as-you-go) first, AceData second.
-// Reasoning: qwen-flash (cheapest real model). Research: Qwen live web search.
-// Image: qwen-image-2.0. Video: wanx2.1-t2v-turbo via the native async API.
-// A rejected upstream call (no credits) costs nothing, so keeping AceData as a
-// fallback never burns money — it simply 403s and Qwen carries the load.
+// Unified AI backend — Qwen (DashScope intl, pay-as-you-go) is the single provider.
+// Reasoning: qwen-flash + Qwen live web search. Image: qwen-image-2.0.
+// Video: wanx2.1-t2v-turbo via the native async API. Qwen is the only provider.
 import fetch from 'node-fetch'
 
 const QWEN_BASE = process.env.QWEN_BASE || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
@@ -16,7 +14,11 @@ export const QWEN_MODELS = {
   video: process.env.QWEN_VIDEO_MODEL || 'wanx2.1-t2v-turbo',
 }
 
-function extractJsonLite(text) {
+function requireKey() {
+  if (!QWEN_KEY) throw new Error('QWEN_KEY is not configured')
+}
+
+export function extractJsonLite(text) {
   if (!text) return null
   let t = String(text).trim()
   t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
@@ -29,65 +31,32 @@ function extractJsonLite(text) {
   return null
 }
 
-// Chat completion. Qwen first; AceData grok only if Qwen is unreachable.
+// Chat completion via Qwen. Never falls back — a failure is a real error.
 export async function callLLM(messages, model = QWEN_MODELS.chat, maxTokens = 2000, opts = {}) {
-  if (QWEN_KEY) {
-    try {
-      const body = { model, messages, max_tokens: maxTokens, temperature: opts.temperature ?? 0.4 }
-      if (opts.search) body.enable_search = true
-      if (opts.json) body.response_format = { type: 'json_object' }
-      const res = await fetch(`${QWEN_BASE}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120000),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        const content = data.choices?.[0]?.message?.content
-        if (content) return content
-        console.log('[LLM] Qwen chat returned empty content')
-      } else {
-        console.log('[LLM] Qwen chat rejected:', res.status, (await res.text()).slice(0, 140))
-      }
-    } catch (e) {
-      console.log('[LLM] Qwen chat error:', e.message)
-    }
-  }
+  requireKey()
+  const body = { model, messages, max_tokens: maxTokens, temperature: opts.temperature ?? 0.4 }
+  if (opts.search) body.enable_search = true
+  if (opts.json) body.response_format = { type: 'json_object' }
 
-  const res = await fetch(`${process.env.ACEDATA_BASE}/v1/chat/completions`, {
+  const res = await fetch(`${QWEN_BASE}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.ACEDATA_KEY}` },
-    body: JSON.stringify({ model: 'grok-4', messages, max_tokens: maxTokens, temperature: 0.4 }),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`LLM failed (Qwen + AceData): ${res.status} ${text.slice(0, 200)}`)
+    throw new Error(`Qwen chat failed: ${res.status} ${text.slice(0, 200)}`)
   }
   const data = await res.json()
-  return data.choices[0].message.content
+  const content = data.choices?.[0]?.message?.content
+  if (!content) throw new Error('Qwen chat returned empty content')
+  return content
 }
 
-// Live web research. Returns a SERP-shaped { organic: [{ title, link, snippet }] }.
+// Live web research via Qwen grounded search.
+// Returns a SERP-shaped { organic: [{ title, link, snippet }] }.
 export async function callSearch(query, num = 6) {
-  // AceData Google SERP when credits exist (a rejected call costs nothing).
-  if (process.env.ACEDATA_KEY) {
-    try {
-      const res = await fetch(`${process.env.ACEDATA_BASE}/serp/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.ACEDATA_KEY}` },
-        body: JSON.stringify({ type: 'search', query, number: num }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (res.ok) return await res.json()
-      console.log('[SEARCH] AceData SERP rejected:', res.status)
-    } catch (e) {
-      console.log('[SEARCH] AceData SERP unavailable:', e.message)
-    }
-  }
-
-  // Qwen grounded live web search.
   const text = await callLLM([
     { role: 'system', content: 'You are a live web-search result extractor. Respond with ONLY valid JSON.' },
     { role: 'user', content: `Use your live web search for this query: "${query}"\nReturn ONLY a JSON object of the form {"organic":[{"title":"...","link":"...","snippet":"..."}]} with up to ${num} REAL, CURRENT results. Every "link" MUST be a real URL returned by your search — never invent or guess URLs.` },
@@ -100,10 +69,9 @@ export async function callSearch(query, num = 6) {
   return { organic }
 }
 
-// Image generation, normalized to the shape the client already reads:
-// { data: [{ image_url }] }.
+// Image generation, normalized to { data: [{ image_url }] }.
 export async function qwenImage(prompt, size = '1024x1024') {
-  if (!QWEN_KEY) throw new Error('QWEN_KEY is not configured')
+  requireKey()
   const res = await fetch(`${QWEN_BASE}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
@@ -120,7 +88,7 @@ export async function qwenImage(prompt, size = '1024x1024') {
 
 // Video generation — native async task flow (submit, then poll from the browser).
 export async function qwenVideoSubmit(prompt, duration = 5) {
-  if (!QWEN_KEY) throw new Error('QWEN_KEY is not configured')
+  requireKey()
   const res = await fetch(`${QWEN_NATIVE}/api/v1/services/aigc/video-generation/video-synthesis`, {
     method: 'POST',
     headers: {
@@ -143,7 +111,7 @@ export async function qwenVideoSubmit(prompt, duration = 5) {
 }
 
 export async function qwenVideoPoll(taskId) {
-  if (!QWEN_KEY) return { httpStatus: 401, status: 'unknown' }
+  requireKey()
   const res = await fetch(`${QWEN_NATIVE}/api/v1/tasks/${taskId}`, {
     headers: { Authorization: `Bearer ${QWEN_KEY}` },
     signal: AbortSignal.timeout(15000),
