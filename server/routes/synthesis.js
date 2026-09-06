@@ -483,14 +483,22 @@ const BEAR_ROLE = `You are the BEAR advocate on a professional crypto trading de
 
 const JUDGE_ROLE = `You are the neutral JUDGE of a crypto trading desk council. You never take sides in advance. You weigh the bull and bear arguments strictly against the evidence pack: claims grounded in specific numbers outrank rhetoric. You score each advocate 0-100 for evidentiary grounding and issue one ruling (BUY, HOLD or AVOID) with a confidence score. Never name data providers, APIs or models.`
 
+// Evidence packs are expensive (RYO + 2 grounded searches). Cache them briefly so a
+// council reload or a second agent hitting the same token doesn't pay the full cost.
+const evidenceCache = new Map()
+const EVIDENCE_TTL = 10 * 60 * 1000
+
 async function buildEvidencePack(symbol, live) {
   const sym = String(symbol || '').toUpperCase()
   const name = live?.name || sym
 
+  const cached = evidenceCache.get(sym)
+  if (cached && Date.now() - cached.at < EVIDENCE_TTL) return cached.pack
+
   const [ryoRes, newsRes, riskRes] = await Promise.allSettled([
     callRyoTool('analyze_token', { symbol: sym }),
-    callSearch(`${name} ${sym} crypto token latest news price`, 6),
-    callSearch(`${name} ${sym} crypto token risk liquidity concerns`, 6),
+    callSearch(`${name} ${sym} crypto token latest news price`, 6, 30000),
+    callSearch(`${name} ${sym} crypto token risk liquidity concerns`, 6, 30000),
   ])
 
   const lines = []
@@ -532,7 +540,10 @@ async function buildEvidencePack(symbol, live) {
     risk.forEach((r) => lines.push(`- [risk] ${r.title || ''} — ${r.snippet || ''}`))
   }
 
-  return lines.join('\n')
+  const pack = lines.join('\n')
+  if (evidenceCache.size > 60) evidenceCache.clear()
+  evidenceCache.set(sym, { at: Date.now(), pack })
+  return pack
 }
 
 async function runCouncil(symbol, live) {
@@ -540,16 +551,16 @@ async function runCouncil(symbol, live) {
   const name = live?.name || sym
   const evidence = await buildEvidencePack(symbol, live)
 
-  // Round 1 — independent opening cases (parallel)
+  // Round 1 — independent opening cases (parallel, hard 45s ceiling each)
   const [bullOpenRes, bearOpenRes] = await Promise.all([
     callLLM([
       { role: 'system', content: BULL_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 120-180 words. Cite specific numbers from the pack.` },
-    ], QWEN_MODELS.bull, 1400).catch(() => ''),
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 90-130 words. Cite specific numbers from the pack.` },
+    ], QWEN_MODELS.bull, 800, { timeoutMs: 45000 }).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 120-180 words. Cite specific numbers from the pack.` },
-    ], QWEN_MODELS.bear, 1400).catch(() => ''),
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 90-130 words. Cite specific numbers from the pack.` },
+    ], QWEN_MODELS.bear, 800, { timeoutMs: 45000 }).catch(() => ''),
   ])
   const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
   const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
@@ -558,12 +569,12 @@ async function runCouncil(symbol, live) {
   const [bullRebutRes, bearRebutRes] = await Promise.all([
     callLLM([
       { role: 'system', content: BULL_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], QWEN_MODELS.bull, 1200).catch(() => ''),
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
+    ], QWEN_MODELS.bull, 700, { timeoutMs: 40000 }).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 100-150 words.` },
-    ], QWEN_MODELS.bear, 1200).catch(() => ''),
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
+    ], QWEN_MODELS.bear, 700, { timeoutMs: 40000 }).catch(() => ''),
   ])
   const bullRebut = String(bullRebutRes || '').trim() || bullOpen
   const bearRebut = String(bearRebutRes || '').trim() || bearOpen
@@ -584,12 +595,12 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
   let judge = extractJson(await callLLM([
     { role: 'system', content: JUDGE_ROLE },
     { role: 'user', content: judgePrompt },
-  ], QWEN_MODELS.judge, 1600).catch(() => ''))
+  ], QWEN_MODELS.judge, 900, { timeoutMs: 50000 }).catch(() => ''))
   if (!judge) {
     judge = extractJson(await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: judgePrompt },
-    ], QWEN_MODELS.judge, 1600).catch(() => ''))
+    ], QWEN_MODELS.judge, 900, { timeoutMs: 35000 }).catch(() => ''))
   }
 
   const bull100 = clampScore(firstNum(judge?.bullScore))

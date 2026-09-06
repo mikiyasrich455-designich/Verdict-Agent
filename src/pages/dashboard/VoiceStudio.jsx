@@ -29,9 +29,10 @@ function VoiceStudioInner({ token, pick }) {
   const audioRef = useRef(null)
 
   // stop narration whenever the token / run changes or we unmount
-  useEffect(() => () => { audioRef.current?.pause() }, [])
+  useEffect(() => () => { audioRef.current?.pause(); window.speechSynthesis?.cancel() }, [])
   useEffect(() => {
     audioRef.current?.pause()
+    window.speechSynthesis?.cancel()
     setSpeaking(false)
   }, [token])
 
@@ -77,6 +78,7 @@ function VoiceStudioInner({ token, pick }) {
         tone: res.tone,
         duration: res.duration,
         format: res.format,
+        provider: res.provider,
       }
       setOutput(entry)
       history.push(entry)
@@ -92,10 +94,24 @@ function VoiceStudioInner({ token, pick }) {
     // Stop the current clip if one is already playing.
     if (speaking) {
       audioRef.current?.pause()
+      window.speechSynthesis?.cancel()
       setSpeaking(false)
       return
     }
-    if (!item?.audioUrl) return
+    // No studio audio (TTS provider down) → read the script aloud in the browser.
+    if (!item?.audioUrl) {
+      const synth = window.speechSynthesis
+      if (!synth) return
+      const utter = new SpeechSynthesisUtterance(String(item?.script || ''))
+      utter.rate = 0.95
+      utter.pitch = 0.8
+      utter.onend = () => setSpeaking(false)
+      utter.onerror = () => setSpeaking(false)
+      synth.cancel()
+      synth.speak(utter)
+      setSpeaking(true)
+      return
+    }
     const audio = new Audio(item.audioUrl)
     audio.onended = () => setSpeaking(false)
     audio.onerror = () => setSpeaking(false)
@@ -167,7 +183,11 @@ function VoiceStudioInner({ token, pick }) {
                       />
                     ))}
                   </div>
-                  <p className="text-[12.5px] text-muted max-w-md">Narration is ready — press play to listen.</p>
+                  <p className="text-[12.5px] text-muted max-w-md">
+                    {output.audioUrl
+                      ? 'Narration is ready — press play to listen.'
+                      : 'Narration is ready — the studio voice is busy, so playback runs in your browser.'}
+                  </p>
                 </motion.div>
               )}
               {phase === 'idle' && !error && (
@@ -191,9 +211,11 @@ function VoiceStudioInner({ token, pick }) {
               <button onClick={() => togglePlay(output)} className="glass-btn">
                 {speaking ? <Pause size={13} /> : <Play size={13} />} {speaking ? 'Pause' : 'Play narration'}
               </button>
-              <DownloadBtn onClick={() => download(output)} label="Download .mp3" />
+              {output.audioUrl && <DownloadBtn onClick={() => download(output)} label="Download .mp3" />}
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
-              <span className="ml-auto font-mono text-[10px] text-faint">QWEN TTS VOICE</span>
+              <span className="ml-auto font-mono text-[10px] text-faint">
+                {output.audioUrl ? (output.provider === 'qwen' ? 'QWEN TTS VOICE' : 'ACEDATA TTS VOICE') : 'BROWSER VOICE'}
+              </span>
             </motion.div>
           )}
         </div>

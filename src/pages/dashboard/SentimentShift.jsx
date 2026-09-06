@@ -14,13 +14,13 @@ const DIR_META = {
 
 export default function SentimentShift() {
   const [runKey, rerun] = useRunKey()
-  const { status, data } = useAgentData(() => fetchSentimentShift(), [runKey])
+  const { status, data, error: agentError } = useAgentData(() => fetchSentimentShift(), [runKey])
 
   if (status === 'error') {
     return (
       <>
         <PageHeader icon={Gauge} title="Sentiment Shift" subtitle="Seven-day mood drift — where the crowd is heading, not where it stood." source={{ mode: 'live', name: 'live sentiment' }} />
-        <ErrorState error={data} onRetry={() => rerun()} />
+        <ErrorState error={agentError} onRetry={() => rerun()} />
       </>
     )
   }

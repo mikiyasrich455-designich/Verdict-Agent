@@ -269,12 +269,12 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → AceData Veo (async task): POST /video submits, GET /video/status/:id polls.
+// Video → AceData Sora (15s, async task): POST /video submits, GET /video/status/:id polls.
 // Prompt is built behind the scenes — a realistic female news anchor delivering the
 // data-driven analysis, never motion graphics.
 export async function generateStudioVideo(script, onStatus) {
   const symbol = script?.symbol || 'TOKEN'
-  const prompt = `A realistic 8-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
+  const prompt = `A realistic 15-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement throughout the full clip. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
 
   try {
     onStatus?.('Submitting render job…')
@@ -286,12 +286,13 @@ export async function generateStudioVideo(script, onStatus) {
 
     if (res.ok) {
       const submitted = await res.json()
+      const clipDuration = Number(submitted.duration) || 15
 
       if (!submitted.queued && (submitted.videoUrl || submitted.posterUrl)) {
         return {
           poster: submitted.posterUrl || submitted.videoUrl,
           videoUrl: submitted.videoUrl,
-          duration: 8,
+          duration: clipDuration,
           resolution: '720p',
           format: 'mp4',
         }
@@ -299,13 +300,14 @@ export async function generateStudioVideo(script, onStatus) {
 
       if (submitted.task_id) {
         onStatus?.('Render queued — generating frames…')
-        for (let i = 0; i < 120; i++) {
-          await wait(2000)
+        // Sora takes ~1-3 minutes; poll every 3s for up to 5 minutes.
+        for (let i = 0; i < 100; i++) {
+          await wait(3000)
 
           const statusRes = await fetch(`/api/proxy/studio/video/status/${encodeURIComponent(submitted.task_id)}`)
           const status = await statusRes.json().catch(() => ({}))
 
-          const secs = (i + 1) * 2
+          const secs = (i + 1) * 3
           onStatus?.(`Rendering… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} elapsed`)
 
           if (status.done && status.videoUrl) {
@@ -313,7 +315,7 @@ export async function generateStudioVideo(script, onStatus) {
             return {
               poster: status.posterUrl || status.videoUrl,
               videoUrl: status.videoUrl,
-              duration: 8,
+              duration: Number(status.duration) || clipDuration,
               resolution: '720p',
               format: 'mp4',
             }
@@ -355,18 +357,20 @@ export async function generateStudioVoice(script, { onProgress } = {}) {
   }
 
   const data = await res.json()
-  if (!data.audioUrl) throw new Error('Voice model returned no audio')
 
   onProgress?.(100)
 
+  // Server may return audioUrl:null when every TTS provider is down — the script
+  // still comes back so the page can read it aloud in the browser instead of erroring.
   return {
     script: data.script,
-    audioUrl: data.audioUrl,
+    audioUrl: data.audioUrl || null,
     duration: data.duration,
     format: data.format || 'mp3',
     tone: data.tone || tone,
     symbol: data.symbol || symbol,
     verdict: data.verdict || verdict,
+    provider: data.provider || 'acedata',
   }
 }
 

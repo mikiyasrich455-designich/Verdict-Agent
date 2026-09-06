@@ -120,7 +120,7 @@ function TokenFocusStrip({ token, focus }) {
 
 export default function MarketOverview() {
   const [runKey, rerun] = useRunKey()
-  const { status, data } = useAgentData(() => fetchMarketOverview(), [runKey])
+  const { status, data, error: agentError } = useAgentData(() => fetchMarketOverview(), [runKey])
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') || getStoredToken()
   const focus = useAgentData(
@@ -135,7 +135,7 @@ export default function MarketOverview() {
       <>
         <PageHeader icon={Globe} title="Market Overview" subtitle="Reading the regime so every other agent knows the weather." source={{ mode: 'live', name: 'live market data' }} />
         {token && <TokenFocusStrip token={token} focus={focus} />}
-        <ErrorState error={data} onRetry={() => rerun()} />
+        <ErrorState error={agentError} onRetry={() => rerun()} />
       </>
     )
   }

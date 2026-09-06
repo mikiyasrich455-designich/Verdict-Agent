@@ -46,7 +46,7 @@ export default function RiskDesk() {
   const token = searchParams.get('token')
   const [limits, setLimits] = useState({ maxPosition: 5, stopLoss: 8, minConviction: 60 })
   const [runKey, rerun] = useRunKey()
-  const { status, data } = useAgentData(
+  const { status, data, error: agentError } = useAgentData(
     () => (token ? fetchRiskDesk(token, limits) : null),
     [token, limits.maxPosition, limits.stopLoss, limits.minConviction, runKey]
   )
@@ -71,7 +71,7 @@ export default function RiskDesk() {
     return (
       <>
         <PageHeader icon={ShieldAlert} title="Risk Desk" subtitle="Sizing, stops and conviction gates — the discipline layer." source={{ mode: 'live', name: 'risk engine' }} />
-        <ErrorState error={data} onRetry={() => rerun()} />
+        <ErrorState error={agentError} onRetry={() => rerun()} />
       </>
     )
   }

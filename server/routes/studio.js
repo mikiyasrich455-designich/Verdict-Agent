@@ -3,8 +3,8 @@
 import { Router } from 'express'
 import { rateLimit } from '../lib/rateLimit.js'
 import { log, error } from '../lib/logger.js'
-import { callLLM, callSearch, QWEN_MODELS, qwenImage } from '../lib/llm.js'
-import { aceTTS, aceVideoSubmit, aceVideoPoll } from '../lib/acedata.js'
+import { callLLM, callSearch, QWEN_MODELS, qwenImage, qwenTTS } from '../lib/llm.js'
+import { aceTTS, aceSoraSubmit, aceSoraPoll, aceVideoSubmit, aceVideoPoll, VIDEO_DURATION, ACE_MODELS } from '../lib/acedata.js'
 
 const router = Router()
 
@@ -81,7 +81,7 @@ router.post('/image', async (req, res) => {
   }
 })
 
-// POST /api/proxy/studio/video — submit AceData Veo render, return task id immediately
+// POST /api/proxy/studio/video — submit a 15s Sora render (falls back to Veo), return task id immediately
 router.post('/video', async (req, res) => {
   const start = Date.now()
   const { prompt } = req.body
@@ -94,23 +94,33 @@ router.post('/video', async (req, res) => {
   }
 
   try {
-    const taskId = await aceVideoSubmit(prompt)
-    log('POST', '/studio/video', 200, Date.now() - start, '(queued · veo)')
-    res.json({ queued: true, task_id: taskId })
-  } catch (err) {
-    error('video', err)
-    res.status(502).json({ error: err.message })
+    const sora = await aceSoraSubmit(prompt)
+    log('POST', '/studio/video', 200, Date.now() - start, `(queued · sora ${sora.duration}s)`)
+    return res.json({ queued: true, task_id: `sora:${sora.taskId}`, duration: sora.duration, provider: 'sora', model: ACE_MODELS.video })
+  } catch (soraErr) {
+    error('video/sora', soraErr)
+    try {
+      const taskId = await aceVideoSubmit(prompt)
+      log('POST', '/studio/video', 200, Date.now() - start, '(queued · veo fallback)')
+      return res.json({ queued: true, task_id: `veo:${taskId}`, duration: 8, provider: 'veo', model: ACE_MODELS.fallbackVideo })
+    } catch (veoErr) {
+      error('video/veo', veoErr)
+      res.status(502).json({ error: veoErr.message })
+    }
   }
 })
 
-// GET /api/proxy/studio/video/status/:taskId — single Qwen poll, returns fast
+// GET /api/proxy/studio/video/status/:taskId — single poll, returns fast
 router.get('/video/status/:taskId', async (req, res) => {
   const start = Date.now()
   const taskId = String(req.params.taskId || '').replace(/[^A-Za-z0-9_:-]/g, '')
   if (!taskId) return res.status(400).json({ error: 'taskId required' })
 
   try {
-    const poll = await aceVideoPoll(taskId)
+    // Prefixed ids route to the right provider; legacy unprefixed ids go to Veo.
+    const isSora = taskId.startsWith('sora:')
+    const rawId = taskId.includes(':') ? taskId.split(':').slice(1).join(':') : taskId
+    const poll = isSora ? await aceSoraPoll(rawId) : await aceVideoPoll(rawId)
 
     if (poll.httpStatus === 404) {
       return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
@@ -119,12 +129,13 @@ router.get('/video/status/:taskId', async (req, res) => {
       return res.json({ done: false, status: `poll_${poll.httpStatus}` })
     }
     if (poll.videoUrl || poll.failed) {
-      log('GET', '/studio/video/status', 200, Date.now() - start, `(${poll.videoUrl ? 'done' : 'failed'})`)
+      log('GET', '/studio/video/status', 200, Date.now() - start, `(${poll.videoUrl ? 'done' : 'failed'} · ${isSora ? 'sora' : 'veo'})`)
       return res.json({
         done: true,
         videoUrl: poll.videoUrl,
         posterUrl: poll.posterUrl,
         status: poll.status,
+        duration: isSora ? VIDEO_DURATION : 8,
         error: poll.failed && !poll.videoUrl ? `Render failed (${poll.status}): ${poll.message}` : null,
       })
     }
@@ -159,12 +170,32 @@ router.post('/voice', async (req, res) => {
     let script = String(condensed || '').replace(/```/g, '').trim()
     if (!script) throw new Error('Voiceover script came back empty')
 
-    const audio = await aceTTS(script)
     const words = script.split(/\s+/).length
     const duration = Math.max(5, Math.round((words / 2.7) * 10) / 10)
 
-    log('POST', '/studio/voice', 200, Date.now() - start, '(acedata tts)')
-    res.json({ script, audioUrl: audio.dataUrl, duration, format: 'mp3', symbol, verdict, tone })
+    // TTS fallback chain: AceData (primary) → Qwen native TTS → script only (client speaks it).
+    const failures = []
+    try {
+      const audio = await aceTTS(script)
+      log('POST', '/studio/voice', 200, Date.now() - start, '(acedata tts)')
+      return res.json({ script, audioUrl: audio.dataUrl, duration, format: 'mp3', symbol, verdict, tone, provider: 'acedata' })
+    } catch (aceErr) {
+      error('voice/acedata', aceErr)
+      failures.push(aceErr.message)
+    }
+
+    try {
+      const audio = await qwenTTS(script)
+      log('POST', '/studio/voice', 200, Date.now() - start, '(qwen tts fallback)')
+      return res.json({ script, audioUrl: audio.dataUrl, duration, format: 'mp3', symbol, verdict, tone, provider: 'qwen' })
+    } catch (qwenErr) {
+      error('voice/qwen', qwenErr)
+      failures.push(qwenErr.message)
+    }
+
+    // Never dead-end the page — hand back the script so the browser can read it aloud.
+    log('POST', '/studio/voice', 200, Date.now() - start, '(script only · tts unavailable)')
+    res.json({ script, audioUrl: null, duration, format: 'mp3', symbol, verdict, tone, provider: 'browser', ttsError: failures[failures.length - 1] || 'TTS unavailable' })
   } catch (err) {
     error('voice', err)
     res.status(502).json({ error: err.message })

@@ -43,7 +43,7 @@ function VideoStudioInner({ token, pick }) {
     return (
       <>
         <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
-        <ErrorState error={data} onRetry={() => window.location.reload()}>
+        <ErrorState error={fetchError} onRetry={() => window.location.reload()}>
           <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
         </ErrorState>
       </>

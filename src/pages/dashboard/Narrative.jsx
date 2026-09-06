@@ -113,7 +113,7 @@ export default function Narrative() {
   const [searchParams, setSearchParams] = useSearchParams()
   const token = searchParams.get('token')
   const [runKey, rerun] = useRunKey()
-  const { status, data } = useAgentData(() => (token ? fetchNarrative(token) : null), [token, runKey])
+  const { status, data, error: agentError } = useAgentData(() => (token ? fetchNarrative(token) : null), [token, runKey])
 
   const pick = (t) => setSearchParams({ token: t })
 
@@ -135,7 +135,7 @@ export default function Narrative() {
     return (
       <>
         <PageHeader icon={Radio} title="KOL Radar" subtitle="The Multi-KOL Narrative spotlight — what the loudest voices are really saying." source={{ mode: 'live', name: 'narrative agent' }} />
-        <ErrorState error={data} onRetry={() => rerun()} />
+        <ErrorState error={agentError} onRetry={() => rerun()} />
       </>
     )
   }

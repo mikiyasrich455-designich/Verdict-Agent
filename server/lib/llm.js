@@ -45,6 +45,8 @@ export function extractJsonLite(text) {
 }
 
 // Chat completion via Qwen. Never falls back — a failure is a real error.
+// opts.timeoutMs lets fast paths (council, search) cut a slow call short instead of
+// sitting on the 120s ceiling.
 export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 2000, opts = {}) {
   requireKey()
   const body = { model, messages, max_tokens: maxTokens, temperature: opts.temperature ?? 0.4 }
@@ -55,7 +57,7 @@ export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 20
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(Number(opts.timeoutMs) || 120000),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -69,11 +71,11 @@ export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 20
 
 // Live web research via Qwen grounded search.
 // Returns a SERP-shaped { organic: [{ title, link, snippet }] }.
-export async function callSearch(query, num = 6) {
+export async function callSearch(query, num = 6, timeoutMs = 45000) {
   const text = await callLLM([
     { role: 'system', content: 'You are a live web-search result extractor. Respond with ONLY valid JSON.' },
     { role: 'user', content: `Use your live web search for this query: "${query}"\nReturn ONLY a JSON object of the form {"organic":[{"title":"...","link":"...","snippet":"..."}]} with up to ${num} REAL, CURRENT results. Every "link" MUST be a real URL returned by your search — never invent or guess URLs.` },
-  ], QWEN_MODELS.search, 1500, { search: true, json: true })
+  ], QWEN_MODELS.search, 1200, { search: true, json: true, timeoutMs })
 
   const parsed = extractJsonLite(text)
   const organic = Array.isArray(parsed?.organic)
