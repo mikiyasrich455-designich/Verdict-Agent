@@ -746,9 +746,17 @@ router.post('/script', async (req, res) => {
       return res.json(cached)
     }
 
-    // Reuse deepAnalyze (now parallel research) — single LLM call for analysis
-    console.log('[SCRIPT] Running parallel analysis (RYO + SERP)...')
-    const verdictData = await deepAnalyze(symbol, req.tokenIdentity)
+    // Reuse the already-computed deep verdict when present so Studio opens fast;
+    // otherwise run the parallel research once and cache it for the verdict too.
+    const verdictCacheKey = `synthesis:verdict:${symbol.toLowerCase()}`
+    let verdictData = getCache(verdictCacheKey)
+    if (verdictData) {
+      console.log('[SCRIPT] Reusing cached verdict (fast path)')
+    } else {
+      console.log('[SCRIPT] Running parallel analysis (RYO + SERP)...')
+      verdictData = await deepAnalyze(symbol, req.tokenIdentity)
+      setCache(verdictCacheKey, verdictData, 30 * 60 * 1000)
+    }
 
     // Build script prompt from verdict data
     const scriptPrompt = `Write a DETAILED, PROFESSIONAL voiceover script for a crypto analysis video about ${symbol.toUpperCase()}.
@@ -770,11 +778,11 @@ SCRIPT REQUIREMENTS:
 
 Write the complete script now. No placeholders, no [pause]. Just the spoken text.`
 
-    console.log('[SCRIPT] Generating script via reasoning model...')
+    console.log('[SCRIPT] Generating script via fast writer model...')
     const script = await callLLM([
       { role: 'system', content: 'You are a professional financial content writer. Write clear, engaging, data-driven scripts. Always deliver complete scripts with no placeholders.' },
       { role: 'user', content: scriptPrompt },
-    ], undefined, 3000)
+    ], QWEN_MODELS.script, 3000)
 
     let scriptText = script
       .replace(/^```[\s]*\n?/, '')

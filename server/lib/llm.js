@@ -14,6 +14,8 @@ export const QWEN_MODELS = {
   chat: process.env.QWEN_CHAT_MODEL || 'deepseek-v4-pro',
   // Grounded web search needs a Qwen model that accepts enable_search.
   search: process.env.QWEN_SEARCH_MODEL || 'qwen-flash',
+  // Voiceover/script writing — a fast model, not the deep reasoning agent.
+  script: process.env.QWEN_SCRIPT_MODEL || 'qwen-flash',
   // Council agents — each side gets its own model, the judge is stronger.
   bull: process.env.QWEN_BULL_MODEL || 'qwen3.6-flash',
   bear: process.env.QWEN_BEAR_MODEL || 'deepseek-v4-flash-0731',

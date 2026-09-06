@@ -21,6 +21,7 @@ import {
   cgCoin,
   cgCoinByCa,
   cgMarketChart,
+  cmcQuote,
 } from './marketData.js'
 
 const EVM_CA_RE = /^0x[a-fA-F0-9]{40}$/
@@ -658,61 +659,57 @@ async function hydrate(profile, candidates) {
   return profile
 }
 
-// Native major coin — CoinGecko carries the real quote for BTC/ETH/SOL etc.
+// Native major coin — CoinMarketCap carries the real quote for BTC/ETH/SOL etc.
 async function majorCoinProfile(symbol) {
-  const id = MAJOR_COINS[String(symbol || '').toUpperCase()]
-  if (!id) return null
-  const coin = await cgCoin(id)
-  if (!coin?.id) return null
+  const upper = String(symbol || '').toUpperCase()
+  if (!MAJOR_COINS[upper]) return null
 
-  const md = coin.market_data || {}
-  const links = coin.links || {}
-  const profile = {
-    symbol: cleanSymbol(coin.symbol) || symbol.toUpperCase(),
-    name: coin.name || symbol,
+  const quote = await cmcQuote([upper])
+  const item = quote?.data?.[upper] || quote?.data?.[cleanSymbol(symbol)]
+  if (!item) return null
+
+  const usd = item.quote?.USD || {}
+  const cap = num(usd.market_cap)
+  const fdv = num(usd.fully_diluted_market_cap)
+
+  return {
+    symbol: cleanSymbol(item.symbol) || upper,
+    name: item.name || upper,
     chain: null,
     chainLabel: null,
     ca: null,
     isCA: false,
-    priceUsd: num(md.current_price?.usd),
-    change24h: num(md.price_change_percentage_24h),
-    marketCap: num(md.market_cap?.usd),
-    fdv: num(md.fully_diluted_valuation?.usd),
-    volume24h: num(md.total_volume?.usd),
+    priceUsd: num(usd.price),
+    change24h: num(usd.percent_change_24h),
+    change7d: num(usd.percent_change_7d),
+    marketCap: cap,
+    fdv,
+    volume24h: num(usd.volume_24h),
     liquidityUsd: 0,
     exchange: null,
-    logo: coin.image?.large || coin.image?.small || null,
+    logo: item.id ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${item.id}.png` : null,
     banner: null,
-    description: (coin.description && coin.description.en) || null,
-    categories: Array.isArray(coin.categories) ? coin.categories.filter(Boolean).slice(0, 6) : [],
+    description: null,
+    categories: [],
     socials: [],
     websites: [],
-    website: (links.homepage || []).find(Boolean) || null,
-    explorer: (links.blockchain_site || []).find(Boolean) || null,
-    twitter: links.twitter_screen_name ? `https://x.com/${links.twitter_screen_name}` : null,
-    cgCoinId: coin.id,
-    cgUrl: `https://www.coingecko.com/en/coins/${coin.id}`,
-    cgRank: coin.market_cap_rank || null,
-    watchers: num(coin.watchlist_portfolio_users) || null,
-    ath: num(md.ath?.usd),
-    athChangePct: num(md.ath_change_percentage?.usd),
-    atl: num(md.atl?.usd),
-    circulatingSupply: num(md.circulating_supply),
-    totalSupply: num(md.total_supply),
-    marketCapFdvRatio: num(md.market_cap_fdv_ratio),
+    website: null,
+    explorer: null,
+    twitter: null,
+    cmcId: item.id || null,
+    cmcRank: item.cmc_rank || null,
+    watchers: null,
+    ath: null,
+    athChangePct: null,
+    atl: null,
+    circulatingSupply: num(item.circulating_supply),
+    totalSupply: num(item.total_supply),
+    marketCapFdvRatio: cap > 0 && fdv > 0 ? +(fdv / cap).toFixed(4) : null,
     priceHistory: [],
+    chartSource: null,
     resolved: true,
-    matchType: 'coingecko_major',
+    matchType: 'cmc_major',
   }
-
-  const chart = await cgMarketChart(coin.id, 7)
-  const prices = chart?.prices || []
-  if (prices.length > 3) {
-    const slice = prices.slice(-32)
-    profile.priceHistory = slice.map(([t, price], i) => ({ i, t: Number(t) || 0, price: Number(price) || 0, volume: 0 }))
-    profile.chartSource = 'live history · last 7 days'
-  }
-  return profile
 }
 
 /**

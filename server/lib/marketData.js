@@ -353,3 +353,34 @@ export function cgMarketChart(coinId, days = 1) {
     `coingecko chart ${coinId}/${days}d`
   )
 }
+
+// ── CoinMarketCap (keyed) — real price / market cap / 24h volume & change ──
+// Native majors (BTC/ETH/SOL/…) are not on DEX indexers; CMC carries the real
+// quote. Keyed, so it is not throttled by a shared cloud IP the way free APIs are.
+const CMC_BASE = 'https://pro-api.coinmarketcap.com/v1'
+
+export function cmcQuote(symbols) {
+  const key = process.env.CMC_API_KEY
+  if (!key) return Promise.resolve(null)
+  const syms = (Array.isArray(symbols) ? symbols : [symbols])
+    .map((s) => cleanSymbol(s))
+    .filter(Boolean)
+  if (!syms.length) return Promise.resolve(null)
+
+  const url = `${CMC_BASE}/cryptocurrency/quotes/latest?symbol=${encodeURIComponent(syms.join(','))}`
+  const fetchQuote = async () => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { ...JSON_HEADERS, 'X-CMC_PRO_API_KEY': key },
+      })
+      if (!res.ok) throw new Error(`cmc HTTP ${res.status}`)
+      return await res.json()
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return attempt(fetchQuote, `cmc quote ${syms.join(',')}`)
+}

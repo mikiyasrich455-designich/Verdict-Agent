@@ -3,7 +3,7 @@
 import { Router } from 'express'
 import { rateLimit } from '../lib/rateLimit.js'
 import { log, error } from '../lib/logger.js'
-import { callLLM, callSearch, qwenImage, qwenVideoSubmit, qwenVideoPoll, qwenTTS } from '../lib/llm.js'
+import { callLLM, callSearch, QWEN_MODELS, qwenImage, qwenVideoSubmit, qwenVideoPoll, qwenTTS } from '../lib/llm.js'
 
 const router = Router()
 
@@ -153,7 +153,7 @@ router.post('/voice', async (req, res) => {
     const condensed = await callLLM([
       { role: 'system', content: 'You are a professional financial voiceover writer. Deliver ONLY the spoken text — no headings, no markdown, no stage directions, no labels.' },
       { role: 'user', content: `Turn the analysis below into one professional ~40-word voiceover for a clean, calm, deep male analyst on a trading desk. Lead with the verdict, cite one or two specific numbers, and end with a short disclaimer. Keep it under 15 seconds spoken.\n\nSYMBOL: ${symbol}\nVERDICT: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 4000)}` },
-    ], undefined, 400)
+    ], QWEN_MODELS.script, 400)
 
     let script = String(condensed || '').replace(/```/g, '').trim()
     if (!script) throw new Error('Voiceover script came back empty')
