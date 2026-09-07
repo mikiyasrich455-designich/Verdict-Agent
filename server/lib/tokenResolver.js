@@ -324,21 +324,24 @@ async function canonicalCoin(symbol) {
   const sym = cleanSymbol(symbol)
   if (!sym || sym === 'UNKNOWN') return null
   const hit = canonMemo.get(sym)
-  if (hit && Date.now() - hit.at < COIN_TTL) return hit.coin
+  // A successful lookup is trusted for the full TTL; a FAILED one only for a
+  // minute — one CoinGecko hiccup must not blind the resolver for 15 minutes.
+  if (hit && Date.now() - hit.at < (hit.coin ? COIN_TTL : 60_000)) return hit.coin
 
   let coin = null
-  try {
-    const hits = (await cgSearch(sym)) || []
-    const id =
-      hits
-        .filter((c) => cleanSymbol(c.symbol) === sym)
-        .sort((a, b) => (num(a.market_cap_rank) || 1e9) - (num(b.market_cap_rank) || 1e9))[0]?.id || null
-    if (id) {
+  for (let attempt = 0; attempt < 2 && !coin; attempt++) {
+    try {
+      const hits = (await cgSearch(sym)) || []
+      const id =
+        hits
+          .filter((c) => cleanSymbol(c.symbol) === sym)
+          .sort((a, b) => (num(a.market_cap_rank) || 1e9) - (num(b.market_cap_rank) || 1e9))[0]?.id || null
+      if (!id) break // no global listing for this symbol — retrying won't help
       coin = await cgCoin(id)
       if (!coin?.id) coin = null
+    } catch (err) {
+      console.warn(`[tokenResolver] canonical coin ${sym} attempt ${attempt + 1} skipped:`, err.message)
     }
-  } catch (err) {
-    console.warn(`[tokenResolver] canonical coin ${sym} skipped:`, err.message)
   }
   if (coin) rememberCoin(coin)
   canonMemo.set(sym, { at: Date.now(), coin })
@@ -1292,15 +1295,20 @@ export async function resolveToken(rawInput) {
       // served (a bridge pair on some side-chain outranked the real mint).
       // Resolve the canonical address directly — that IS the asset whose price
       // the global tape is quoting, with its real artwork, pools and tape.
-      // Guard: only when the searched pairs' prices don't contradict the
-      // canonical tape — a same-ticker stranger keeps its own identity.
       const searchAgrees =
         canonPrice > 0 &&
         ranked.some((g) => {
           const p = num(g.pair?.priceUsd)
           return p > 0 && p >= canonPrice / 3 && p <= canonPrice * 3
         })
-      if (searchAgrees) {
+      // A bare ticker means the globally established asset: when the canonical
+      // listing ranks in the top 1000, trust its published address even if the
+      // search only surfaced same-ticker strangers at contradictory prices.
+      // Obscure canons keep the price-agreement guard so small caps are never
+      // hijacked — a genuine small-cap collision can paste its CA instead.
+      const canonRank = num(canon?.market_cap_rank) || null
+      const established = canonRank > 0 && canonRank <= 1000
+      if (established || searchAgrees) {
         for (const c of cas.slice(0, 3)) {
           try {
             out = await resolveByCa(c.ca, { matchType })
