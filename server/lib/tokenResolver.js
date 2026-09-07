@@ -20,6 +20,8 @@ import {
   pumpCoin,
   cgCoin,
   cgCoinByCa,
+  cgSearch,
+  cgMarkets,
   cgMarketChart,
   cmcQuote,
 } from './marketData.js'
@@ -193,6 +195,100 @@ function consensusMarket(profile) {
   }
   if (Number.isFinite(profile.change6h) && Math.abs(profile.change6h) > 9999) profile.change6h = null
   if (Number.isFinite(profile.change1h) && Math.abs(profile.change1h) > 9999) profile.change1h = null
+  return profile
+}
+
+// ── Global aggregate overlay ────────────────────────────────────────────────
+// A contract address can point at a venue with no real tape of its own: Astar's
+// Ethereum bridge vault prints "$25 volume" and a "$93K cap" while the asset
+// trades nine figures globally. So the headline metrics (price, cap, volume,
+// rank) are pulled from the GLOBAL aggregate market — CoinGecko first,
+// CoinMarketCap as the keyed fallback — matched by symbol and cross-checked
+// against the contract's own tape. The contract keeps its real job: identity,
+// socials, artwork and on-chain liquidity. Pure on-chain memecoins with no
+// global listing keep their pool numbers, because for them the pool IS market.
+async function globalMarketOverlay(profile) {
+  if (profile.globalMarket) return profile
+  const sym = cleanSymbol(profile.symbol)
+  if (!sym || sym === 'UNKNOWN') return profile
+
+  let g = null
+  let cgId = null
+  try {
+    const hits = (await cgSearch(sym)) || []
+    cgId =
+      hits
+        .filter((c) => cleanSymbol(c.symbol) === sym)
+        .sort((a, b) => (num(a.market_cap_rank) || 1e9) - (num(b.market_cap_rank) || 1e9))[0]?.id || null
+    if (cgId) {
+      const row = ((await cgMarkets([cgId])) || [])[0]
+      if (row) {
+        g = {
+          source: 'coingecko',
+          name: row.name || null,
+          price: num(row.current_price),
+          change: fin(row.price_change_percentage_24h_in_currency ?? row.price_change_percentage_24h),
+          marketCap: num(row.market_cap),
+          fdv: num(row.fully_diluted_valuation),
+          volume: num(row.total_volume),
+          rank: num(row.market_cap_rank) || null,
+          circulating: num(row.circulating_supply),
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[tokenResolver] global overlay (gecko) skipped:', err.message)
+  }
+
+  if (!g || (!g.marketCap && !g.volume)) {
+    try {
+      const rawItem = (await cmcQuote(sym))?.data?.[sym]
+      const items = Array.isArray(rawItem) ? rawItem : rawItem ? [rawItem] : []
+      const item = items.slice().sort((a, b) => (num(a.cmc_rank) || 1e9) - (num(b.cmc_rank) || 1e9))[0]
+      const usd = item?.quote?.USD
+      if (usd && (num(usd.market_cap) || num(usd.volume_24h))) {
+        g = {
+          source: 'cmc',
+          name: item.name || null,
+          price: num(usd.price),
+          change: fin(usd.percent_change_24h),
+          marketCap: num(usd.market_cap),
+          fdv: num(usd.fully_diluted_market_cap),
+          volume: num(usd.volume_24h),
+          rank: num(item.cmc_rank) || null,
+          circulating: num(item.circulating_supply),
+        }
+        cgId = null
+      }
+    } catch (err) {
+      console.warn('[tokenResolver] global overlay (cmc) skipped:', err.message)
+    }
+  }
+  if (!g || (!g.marketCap && !g.volume && !g.price)) return profile
+
+  // Same ticker on an unrelated asset: the aggregate price must agree with the
+  // contract-bound tape within 3x, or a lookalike's global stats would leak in.
+  if (profile.priceUsd > 0 && g.price > 0 && (g.price < profile.priceUsd / 3 || g.price > profile.priceUsd * 3)) {
+    return profile
+  }
+
+  observe(profile, g.source, g.price || null, g.change)
+  if (g.price > 0) profile.priceUsd = g.price
+  if (g.change !== null) profile.change24h = g.change
+  if (g.marketCap > 0) profile.marketCap = g.marketCap
+  if (g.fdv > 0) profile.fdv = g.fdv
+  if (g.volume > 0) profile.volume24h = g.volume
+  if (g.rank) profile.cgRank = profile.cgRank || g.rank
+  if (g.circulating > 0) profile.circulatingSupply = profile.circulatingSupply || g.circulating
+  if (cgId) {
+    profile.cgCoinId = profile.cgCoinId || cgId
+    profile.cgUrl = profile.cgUrl || `https://www.coingecko.com/en/coins/${cgId}`
+  }
+  if (g.name && (!profile.name || PAIR_LIKE_NAME.test(profile.name) || profile.name === profile.symbol)) {
+    profile.name = g.name
+  }
+  profile.globalMarket = true
+  profile.marketScope = 'global aggregate'
   return profile
 }
 
@@ -752,9 +848,22 @@ async function hydrate(profile, candidates) {
     rememberSticky(profile)
   }
 
+  // Headline metrics come from the global aggregate market, never from one
+  // isolated pool: a bridge vault's "$25 volume" must not reach a dashboard.
+  try {
+    await globalMarketOverlay(profile)
+  } catch (err) {
+    console.warn('[tokenResolver] global market overlay skipped:', err.message)
+  }
+
   // Cross-source sanity gate: one broken pool must never print a fake price
   // or an impossible 24h move on any agent page.
   consensusMarket(profile)
+
+  // Cap derivable from real price x real circulating supply beats a blank tile.
+  if (!profile.marketCap && profile.priceUsd > 0 && profile.circulatingSupply > 0) {
+    profile.marketCap = profile.priceUsd * profile.circulatingSupply
+  }
 
   if (PAIR_LIKE_NAME.test(String(profile.name || ''))) {
     profile.name = String(profile.name).split('/')[0].trim()
@@ -822,6 +931,8 @@ async function majorCoinProfile(symbol) {
     priceHistory: [],
     chartSource: null,
     resolved: true,
+    globalMarket: true,
+    marketScope: 'global aggregate',
     matchType: 'cmc_major',
   })
 }
@@ -939,6 +1050,21 @@ export async function resolveToken(rawInput) {
       priceHistory: [],
       resolved: false,
       matchType: 'ticker_unverified',
+    }
+    // CEX-only listings have no DEX pair but a real global aggregate tape —
+    // pull it instead of printing a zeroed-out dashboard.
+    try {
+      await globalMarketOverlay(out)
+    } catch (err) {
+      console.warn('[tokenResolver] ticker overlay skipped:', err.message)
+    }
+    if (out.globalMarket) {
+      out.matchType = 'global_listing'
+      out.resolved = true
+    }
+    consensusMarket(out)
+    if (!out.marketCap && out.priceUsd > 0 && out.circulatingSupply > 0) {
+      out.marketCap = out.priceUsd * out.circulatingSupply
     }
     setCache(cacheKey, out, 2 * 60 * 1000)
     return out

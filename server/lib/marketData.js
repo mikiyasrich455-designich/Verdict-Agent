@@ -343,6 +343,22 @@ export function cgSearch(query) {
   )
 }
 
+// The global aggregate tape: headline price / cap / volume / rank for coin ids,
+// merged across every venue CoinGecko tracks. Dashboard primaries come from
+// here — never from a single isolated liquidity pool.
+export function cgMarkets(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean)
+  if (!list.length) return Promise.resolve([])
+  return attempt(
+    () =>
+      httpJson(
+        `${CG_BASE}/coins/markets?vs_currency=usd&ids=${encodeURIComponent(list.join(','))}&price_change_percentage=24h`,
+        9000
+      ),
+    `coingecko markets ${list.join(',')}`
+  )
+}
+
 // Thin tokens come back with an empty 1-day series, so callers can widen the
 // window; the point list is returned as-is for the chart to trim.
 export function cgMarketChart(coinId, days = 1) {
