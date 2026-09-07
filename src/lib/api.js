@@ -279,61 +279,91 @@ export async function generateStudioImage(script) {
   return { url: verdictCardPng(script), format: 'png' }
 }
 
-// Video → AceData Sora (15s, async task): POST /video submits, GET /video/status/:id polls.
-// Prompt is built behind the scenes — a realistic female news anchor delivering the
-// data-driven analysis, never motion graphics.
+// Video → AceData Grok Imagine (grok-imagine-video, async task). The live model caps one clip at
+// 15s, so the 25-second news package is rendered as two cheap shots — 15s opening + market numbers,
+// then 10s bull-vs-bear + balanced rating — and played back-to-back as one broadcast. Both prompts
+// describe the same anchor, desk and lighting so the cut feels like a real studio package.
+// Prompts are built behind the scenes; the UI only ever sees the finished clips.
+function studioShots(symbol) {
+  const anchor = `A professional, realistic female news anchor sits at a clean, modern broadcast desk with a softly blurred studio background, subtle cool-blue accent lighting, the same wardrobe and hairstyle throughout. She looks directly into the camera with natural lip-sync and clear mouth movement. Neutral, professional, data-driven tone, cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, crisp detail, smooth locked-off camera. A real person speaking to camera — no motion graphics, no cartoons, no text-only frames.`
+
+  return [
+    {
+      duration: 15,
+      prompt: `A cinematic 15-second news broadcast shot, the opening of a market report. ${anchor} She opens the segment and delivers the first half of a ${symbol} analysis, pacing her words to fill the full 15 seconds: a calm greeting, then what the data shows right now — the current price trend, the 24-hour move, market cap and trading volume. Clean, well-paced broadcast delivery, never a buy or sell instruction.`,
+    },
+    {
+      duration: 10,
+      prompt: `A cinematic 10-second news broadcast shot, the closing half of the same market report. ${anchor} She continues straight from the opening and wraps the ${symbol} analysis in 10 seconds: the bull case versus the bear case, then one balanced rating of growth potential versus risk, and a brief professional sign-off. Never a buy or sell instruction.`,
+    },
+  ]
+}
+
 export async function generateStudioVideo(script, onStatus) {
   const symbol = script?.symbol || 'TOKEN'
-  const prompt = `A realistic 15-second news broadcast video. A professional female news anchor sits at a clean, modern news desk with a subtle studio background. She looks directly into the camera and calmly delivers a market analysis for ${symbol}, with natural lip-sync and clear mouth movement throughout the full clip. She summarizes what the data shows: current price trend, market cap and volume, the bull case versus the bear case, and the growth potential versus risk — as a balanced rating, never a buy or sell instruction. Neutral, professional, data-driven tone. Cinematic studio lighting, shallow depth of field, realistic skin, hair and fabric, high detail. A real person speaking, no motion graphics, no cartoons, no text-only frames.`
+  const shots = studioShots(symbol)
 
   try {
-    onStatus?.('Submitting render job…')
-    const res = await fetch('/api/proxy/studio/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
-    })
+    onStatus?.('Submitting render jobs…')
+    const queued = []
+    for (let s = 0; s < shots.length; s++) {
+      const res = await fetch('/api/proxy/studio/video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: shots[s].prompt, duration: shots[s].duration }),
+      })
+      const submitted = res.ok ? await res.json().catch(() => ({})) : {}
+      if (!submitted.task_id) throw new Error(submitted.error || `Shot ${s + 1} failed to queue`)
+      queued.push({
+        task_id: submitted.task_id,
+        resolution: submitted.resolution || '720p',
+        duration: Number(submitted.duration) || shots[s].duration,
+        url: null,
+        poster: null,
+        error: null,
+      })
+    }
 
-    if (res.ok) {
-      const submitted = await res.json()
-      const clipDuration = Number(submitted.duration) || 15
+    onStatus?.('Both shots queued — rendering…')
+    // Each Grok Imagine shot takes ~30s–3min; both render in parallel. Poll every 3s up to 8 minutes.
+    for (let i = 0; i < 160; i++) {
+      await wait(3000)
 
-      if (!submitted.queued && (submitted.videoUrl || submitted.posterUrl)) {
-        return {
-          poster: submitted.posterUrl || submitted.videoUrl,
-          videoUrl: submitted.videoUrl,
-          duration: clipDuration,
-          resolution: '720p',
-          format: 'mp4',
-        }
-      }
-
-      if (submitted.task_id) {
-        onStatus?.('Render queued — generating frames…')
-        // Sora takes ~1-3 minutes; poll every 3s for up to 5 minutes.
-        for (let i = 0; i < 100; i++) {
-          await wait(3000)
-
-          const statusRes = await fetch(`/api/proxy/studio/video/status/${encodeURIComponent(submitted.task_id)}`)
+      const pending = queued.filter((q) => !q.url && !q.error)
+      await Promise.all(
+        pending.map(async (q) => {
+          const statusRes = await fetch(`/api/proxy/studio/video/status/${encodeURIComponent(q.task_id)}`)
           const status = await statusRes.json().catch(() => ({}))
-
-          const secs = (i + 1) * 3
-          onStatus?.(`Rendering… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} elapsed`)
-
           if (status.done && status.videoUrl) {
-            onStatus?.('Render complete')
-            return {
-              poster: status.posterUrl || status.videoUrl,
-              videoUrl: status.videoUrl,
-              duration: Number(status.duration) || clipDuration,
-              resolution: '720p',
-              format: 'mp4',
-            }
+            q.url = status.videoUrl
+            q.poster = status.posterUrl || status.videoUrl
+            if (Number(status.duration)) q.duration = Number(status.duration)
+          } else if (status.done && status.error) {
+            q.error = status.error
           }
-          if (status.done && status.error) throw new Error(status.error)
-        }
-        throw new Error('Video render timed out')
-      }
+        })
+      )
+
+      const settled = queued.filter((q) => q.url || q.error).length
+      const secs = (i + 1) * 3
+      onStatus?.(`Rendering shot ${Math.min(settled + 1, queued.length)}/${queued.length}… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} elapsed`)
+
+      if (settled === queued.length) break
+    }
+
+    // One surviving shot still beats nothing — only bail to the local card when every shot failed.
+    const clips = queued.filter((q) => q.url)
+    if (!clips.length) throw new Error(queued.find((q) => q.error)?.error || 'Video render timed out')
+
+    onStatus?.('Render complete')
+    return {
+      poster: clips[0].poster || clips[0].url,
+      videoUrl: clips[0].url,
+      clips: clips.map((c) => c.url),
+      posters: clips.map((c) => c.poster || c.url),
+      duration: clips.reduce((sum, c) => sum + (c.duration || 0), 0),
+      resolution: clips[0].resolution,
+      format: 'mp4',
     }
   } catch (err) {
     console.warn('[studio] video model unavailable — rendering live-data motion card:', err.message)

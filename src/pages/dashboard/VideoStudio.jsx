@@ -1,4 +1,4 @@
-// Studio · Video — generates a motion clip via Qwen video model
+// Studio · Video — a 25s cinematic news package from two Grok Imagine shots (15s + 10s) played back-to-back
 import { useState } from 'react'
 import { Video, Clapperboard, RefreshCw, Film } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
@@ -24,6 +24,7 @@ function VideoStudioInner({ token, pick }) {
   const [error, setError] = useState(null)
   const [output, setOutput] = useState(null)
   const [stage, setStage] = useState('')
+  const [clipIndex, setClipIndex] = useState(0)
 
   if (!token) {
     return (
@@ -63,6 +64,7 @@ function VideoStudioInner({ token, pick }) {
     setPhase('generating')
     setError(null)
     setOutput(null)
+    setClipIndex(0)
     setStage('Starting render…')
     try {
       const res = await generateStudioVideo(script, setStage)
@@ -71,6 +73,7 @@ function VideoStudioInner({ token, pick }) {
         verdict: script.verdict,
         poster: res.poster,
         videoUrl: res.videoUrl,
+        clips: res.clips,
         duration: res.duration,
         resolution: res.resolution,
         format: res.format,
@@ -85,8 +88,11 @@ function VideoStudioInner({ token, pick }) {
     }
   }
 
-  const download = (item) =>
-    downloadDataUrl(item.videoUrl || item.poster, `verdict-${item.symbol.toLowerCase()}-clip.${item.format || 'mp4'}`)
+  // The 25s package arrives as two Grok shots played back-to-back; the local
+  // motion-card fallback is a single clip, so normalise both into one list.
+  const clips = output?.clips?.length ? output.clips : output?.videoUrl ? [output.videoUrl] : []
+  const shot = clips.length ? clips[Math.min(clipIndex, clips.length - 1)] : null
+  const shotName = clips.length > 1 ? `shot${clipIndex + 1}-` : 'clip-'
 
   return (
     <>
@@ -105,11 +111,12 @@ function VideoStudioInner({ token, pick }) {
           <div className="space-y-4">
             <div>
               <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Concept</p>
-              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Crypto analyst at his desk delivering the verdict, straight to camera</p>
+              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Realistic female news anchor at a clean broadcast desk delivering the verdict, straight to camera — two cinematic shots cut into one continuous package</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="glass-chip"><Film size={11} /> 15s</span>
+              <span className="glass-chip"><Film size={11} /> 25s · 2 shots</span>
               <span className="glass-chip">720p · 16:9</span>
+              <span className="glass-chip">Grok Imagine</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
@@ -128,13 +135,36 @@ function VideoStudioInner({ token, pick }) {
                 <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-[320px] flex flex-col items-center justify-center gap-4">
                   <OrbitLoader label="Generating video…" />
                   <p className="font-mono text-[11px] text-accent/80">{stage || 'Please wait…'}</p>
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">AI VIDEO RENDER · UP TO 2-3 MINUTES</p>
+                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">AI VIDEO RENDER · 2 SHOTS IN PARALLEL · UP TO 3-4 MINUTES</p>
                 </motion.div>
               )}
               {phase === 'done' && output && (
                 <motion.div key="out" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full overflow-hidden">
-                  {output.videoUrl ? (
-                    <video src={output.videoUrl} controls className="w-full rounded-lg" />
+                  {shot ? (
+                    <>
+                      <video
+                        key={shot}
+                        src={shot}
+                        controls
+                        autoPlay
+                        className="w-full rounded-lg"
+                        onEnded={() => setClipIndex((i) => Math.min(i + 1, clips.length - 1))}
+                      />
+                      {clips.length > 1 && (
+                        <div className="flex items-center gap-2 mt-2">
+                          {clips.map((c, i) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setClipIndex(i)}
+                              className={`glass-chip ${i === clipIndex ? '!text-accent !border-accent/40' : ''}`}
+                            >
+                              <Film size={11} /> Shot {i + 1} · {i === 0 ? '15s' : '10s'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <img src={output.poster} alt={`${output.symbol} verdict clip`} className="w-full ken-burns" />
                   )}
@@ -158,8 +188,11 @@ function VideoStudioInner({ token, pick }) {
 
           {phase === 'done' && output && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 mt-3">
-              <DownloadBtn onClick={() => download(output)} label={`Download clip .${output.format || 'mp4'}`} />
-              <span className="glass-chip">{output.duration}s</span>
+              <DownloadBtn
+                onClick={() => downloadDataUrl(shot || output.poster, `verdict-${output.symbol.toLowerCase()}-${shotName}${output.format || 'mp4'}`)}
+                label={`Download ${clips.length > 1 ? `shot ${clipIndex + 1} ` : 'clip '}.${output.format || 'mp4'}`}
+              />
+              <span className="glass-chip">{output.duration}s{clips.length > 1 ? ` · ${clips.length} shots` : ''}</span>
               <span className="glass-chip">{output.resolution}</span>
               <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
             </motion.div>
@@ -170,7 +203,7 @@ function VideoStudioInner({ token, pick }) {
       <StudioHistoryStrip
         items={history.items}
         activeId={output?.id}
-        onPick={(it) => { setOutput(it); setPhase('done') }}
+        onPick={(it) => { setOutput(it); setClipIndex(0); setPhase('done') }}
         renderThumb={(it) => ({ backgroundImage: `url(${it.poster})` })}
       />
     </>

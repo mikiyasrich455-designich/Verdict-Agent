@@ -1,4 +1,4 @@
-// AceDataCloud (api.acedata.cloud) — used for Studio VIDEO (Google Veo) and VOICE (TTS).
+// AceDataCloud (api.acedata.cloud) — Studio VIDEO (Grok Imagine, cheap, ≤15s per clip) + VOICE (TTS).
 // Key comes from Render env ACEDATA_KEY — never committed. Every model is env-overridable.
 import fetch from 'node-fetch'
 
@@ -6,13 +6,19 @@ const ACE_BASE = process.env.ACEDATA_BASE || 'https://api.acedata.cloud'
 const ACE_KEY = process.env.ACEDATA_KEY || ''
 
 export const ACE_MODELS = {
+  // Primary video model: Grok Imagine — lowest price, text→video, duration 1–15s per clip.
+  grokVideo: process.env.ACEDATA_GROK_VIDEO_MODEL || 'grok-imagine-video',
   video: process.env.ACEDATA_VIDEO_MODEL || 'sora-2',
   fallbackVideo: process.env.ACEDATA_FALLBACK_VIDEO_MODEL || 'veo3-fast',
   tts: process.env.ACEDATA_TTS_MODEL || 'tts-1-hd',
   ttsVoice: process.env.ACEDATA_TTS_VOICE || 'onyx',
 }
 
-export const VIDEO_DURATION = Math.min(25, Math.max(5, Number(process.env.ACEDATA_VIDEO_DURATION) || 15))
+// Grok Imagine (grok-imagine-video:official) hard-caps a single clip at 15s (verified live).
+// Default 15s; Sora fallback can still use up to 25s via ACEDATA_VIDEO_DURATION.
+export const VIDEO_DURATION = Math.min(30, Math.max(5, Number(process.env.ACEDATA_VIDEO_DURATION) || 15))
+export const GROK_MAX_DURATION = 15 // live API: "duration must be between 1 and 15 for grok-imagine-video:official"
+export const VIDEO_RESOLUTION = process.env.ACEDATA_VIDEO_RESOLUTION || '720p' // grok: 480p | 720p | 1080p
 export const VIDEO_SIZE = process.env.ACEDATA_VIDEO_SIZE || 'small' // sora: small | large
 
 function requireKey() {
@@ -41,7 +47,45 @@ export async function aceTTS(text, voice = ACE_MODELS.ttsVoice) {
   return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}`, bytes: bytes.length }
 }
 
-// ─── PRIMARY: Sora (supports real duration 10/15/25s) ───────────────────────
+// ─── PRIMARY: Grok Imagine (cheap, text→video, 1–15s per clip) ───────────────
+// Submit → POST /grok/videos with async:true. Returns task_id immediately.
+export async function aceGrokSubmit(prompt, duration = VIDEO_DURATION) {
+  requireKey()
+  const body = {
+    model: ACE_MODELS.grokVideo,
+    prompt: String(prompt || ''),
+    duration: Math.min(GROK_MAX_DURATION, Math.max(1, Number(duration) || VIDEO_DURATION)),
+    aspect_ratio: '16:9',
+    resolution: VIDEO_RESOLUTION,
+    async: true,
+  }
+  const res = await fetch(`${ACE_BASE}/grok/videos`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${ACE_KEY}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  })
+  if (!res.ok) throw new Error(`AceData grok submit failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
+  const data = await res.json()
+  const taskId = data?.task_id || data?.id
+  if (!taskId) throw new Error(`AceData grok: no task_id (${JSON.stringify(data).slice(0, 160)})`)
+  return { taskId, duration: body.duration }
+}
+
+// Grok poll → POST /grok/tasks { id, action: "retrieve" }.
+export async function aceGrokPoll(taskId) {
+  requireKey()
+  const res = await fetch(`${ACE_BASE}/grok/tasks`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${ACE_KEY}` },
+    body: JSON.stringify({ id: taskId, action: 'retrieve' }),
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!res.ok) return { httpStatus: res.status, status: 'unknown' }
+  return normalizeTask(await res.json())
+}
+
+// ─── FALLBACK 1: Sora (supports real duration 10/15/25s) ─────────────────────
 // Submit → POST /sora/videos. Returns task_id immediately (async).
 export async function aceSoraSubmit(prompt, duration = VIDEO_DURATION) {
   requireKey()

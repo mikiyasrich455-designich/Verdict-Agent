@@ -1,10 +1,10 @@
-// Studio media + chat/search routes — Qwen is the single provider.
-// Image → qwen-image-2.0 · Video → wanx2.1-t2v-turbo (async) · Chat/Search → qwen-flash.
+// Studio media + chat/search routes.
+// Image → qwen-image · Video → Grok Imagine 2×shots = 25s (async, falls back to Sora/Veo) · Voice → Qwen script + AceData TTS · Chat/Search → qwen-flash.
 import { Router } from 'express'
 import { rateLimit } from '../lib/rateLimit.js'
 import { log, error } from '../lib/logger.js'
 import { callLLM, callSearch, QWEN_MODELS, qwenImage, qwenTTS } from '../lib/llm.js'
-import { aceTTS, aceSoraSubmit, aceSoraPoll, aceVideoSubmit, aceVideoPoll, VIDEO_DURATION, ACE_MODELS } from '../lib/acedata.js'
+import { aceTTS, aceGrokSubmit, aceGrokPoll, aceSoraSubmit, aceSoraPoll, aceVideoSubmit, aceVideoPoll, VIDEO_RESOLUTION, ACE_MODELS } from '../lib/acedata.js'
 
 const router = Router()
 
@@ -81,10 +81,12 @@ router.post('/image', async (req, res) => {
   }
 })
 
-// POST /api/proxy/studio/video — submit a 15s Sora render (falls back to Veo), return task id immediately
+// POST /api/proxy/studio/video — submit one Grok Imagine shot (cheap; falls back to Sora then Veo)
+// and return the task id immediately. The live grok model caps a clip at 15s, so the client submits
+// two shots (15s + 10s) and plays them back-to-back as one 25s news package. Poll /video/status/:taskId.
 router.post('/video', async (req, res) => {
   const start = Date.now()
-  const { prompt } = req.body
+  const { prompt, duration } = req.body
   if (!prompt) return res.status(400).json({ error: 'prompt required' })
 
   const limit = rateLimit('studio', 10, 60000)
@@ -94,18 +96,25 @@ router.post('/video', async (req, res) => {
   }
 
   try {
-    const sora = await aceSoraSubmit(prompt)
-    log('POST', '/studio/video', 200, Date.now() - start, `(queued · sora ${sora.duration}s)`)
-    return res.json({ queued: true, task_id: `sora:${sora.taskId}`, duration: sora.duration, provider: 'sora', model: ACE_MODELS.video })
-  } catch (soraErr) {
-    error('video/sora', soraErr)
+    const grok = await aceGrokSubmit(prompt, duration)
+    log('POST', '/studio/video', 200, Date.now() - start, `(queued · grok ${grok.duration}s)`)
+    return res.json({ queued: true, task_id: `grok:${grok.taskId}`, duration: grok.duration, resolution: VIDEO_RESOLUTION, provider: 'grok', model: ACE_MODELS.grokVideo })
+  } catch (grokErr) {
+    error('video/grok', grokErr)
     try {
-      const taskId = await aceVideoSubmit(prompt)
-      log('POST', '/studio/video', 200, Date.now() - start, '(queued · veo fallback)')
-      return res.json({ queued: true, task_id: `veo:${taskId}`, duration: 8, provider: 'veo', model: ACE_MODELS.fallbackVideo })
-    } catch (veoErr) {
-      error('video/veo', veoErr)
-      res.status(502).json({ error: veoErr.message })
+      const sora = await aceSoraSubmit(prompt, duration)
+      log('POST', '/studio/video', 200, Date.now() - start, `(queued · sora ${sora.duration}s fallback)`)
+      return res.json({ queued: true, task_id: `sora:${sora.taskId}`, duration: sora.duration, resolution: VIDEO_RESOLUTION, provider: 'sora', model: ACE_MODELS.video })
+    } catch (soraErr) {
+      error('video/sora', soraErr)
+      try {
+        const taskId = await aceVideoSubmit(prompt)
+        log('POST', '/studio/video', 200, Date.now() - start, '(queued · veo fallback)')
+        return res.json({ queued: true, task_id: `veo:${taskId}`, duration: 8, resolution: VIDEO_RESOLUTION, provider: 'veo', model: ACE_MODELS.fallbackVideo })
+      } catch (veoErr) {
+        error('video/veo', veoErr)
+        res.status(502).json({ error: veoErr.message })
+      }
     }
   }
 })
@@ -118,9 +127,11 @@ router.get('/video/status/:taskId', async (req, res) => {
 
   try {
     // Prefixed ids route to the right provider; legacy unprefixed ids go to Veo.
+    const isGrok = taskId.startsWith('grok:')
     const isSora = taskId.startsWith('sora:')
+    const provider = isGrok ? 'grok' : isSora ? 'sora' : 'veo'
     const rawId = taskId.includes(':') ? taskId.split(':').slice(1).join(':') : taskId
-    const poll = isSora ? await aceSoraPoll(rawId) : await aceVideoPoll(rawId)
+    const poll = isGrok ? await aceGrokPoll(rawId) : isSora ? await aceSoraPoll(rawId) : await aceVideoPoll(rawId)
 
     if (poll.httpStatus === 404) {
       return res.json({ done: true, videoUrl: null, posterUrl: null, status: 'not_found', error: 'Render task not found — please try again.' })
@@ -129,13 +140,14 @@ router.get('/video/status/:taskId', async (req, res) => {
       return res.json({ done: false, status: `poll_${poll.httpStatus}` })
     }
     if (poll.videoUrl || poll.failed) {
-      log('GET', '/studio/video/status', 200, Date.now() - start, `(${poll.videoUrl ? 'done' : 'failed'} · ${isSora ? 'sora' : 'veo'})`)
+      log('GET', '/studio/video/status', 200, Date.now() - start, `(${poll.videoUrl ? 'done' : 'failed'} · ${provider})`)
       return res.json({
         done: true,
         videoUrl: poll.videoUrl,
         posterUrl: poll.posterUrl,
         status: poll.status,
-        duration: isSora ? VIDEO_DURATION : 8,
+        // Only Veo has a fixed length; grok/sora clips keep the duration the client asked for.
+        duration: provider === 'veo' ? 8 : undefined,
         error: poll.failed && !poll.videoUrl ? `Render failed (${poll.status}): ${poll.message}` : null,
       })
     }
