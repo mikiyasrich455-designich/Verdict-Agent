@@ -24,6 +24,8 @@ import {
   cgMarkets,
   cgMarketChart,
   cmcQuote,
+  cmcInfo,
+  venueCandles,
 } from './marketData.js'
 
 const EVM_CA_RE = /^0x[a-fA-F0-9]{40}$/
@@ -458,6 +460,73 @@ function applyPairSocials(profile) {
   const sites = Array.isArray(profile.websites) ? profile.websites : []
   profile.website = profile.website || sites[0]?.url || null
   profile.explorer = profile.explorer || pick(/explorer|solscan|etherscan|basescan|bscscan/i)
+  return profile
+}
+
+// The coin listing publishes the project's own copy, artwork and links, but its
+// free tier throttles shared cloud IPs — the keyed metadata endpoint then fills
+// whatever is still blank. Only ever for a PROVABLY same asset: the listing must
+// publish our contract address, so a ticker collision can never borrow another
+// project's description and logo. Records are memoised: metadata moves slowly.
+const INFO_TTL = 60 * 60 * 1000
+const cmcInfoMemo = new Map()
+
+async function recallCmcInfo(symbol) {
+  const sym = cleanSymbol(symbol)
+  if (!sym) return null
+  const hit = cmcInfoMemo.get(sym)
+  if (hit && Date.now() - hit.at < INFO_TTL) return hit.items
+
+  let items = null
+  try {
+    const raw = (await cmcInfo(sym))?.data?.[sym]
+    items = Array.isArray(raw) ? raw : raw ? [raw] : null
+  } catch (err) {
+    console.warn('[tokenResolver] cmc metadata skipped:', err.message)
+  }
+  if (items) {
+    cmcInfoMemo.set(sym, { at: Date.now(), items })
+    if (cmcInfoMemo.size > 200) {
+      for (const [k, v] of cmcInfoMemo) {
+        if (Date.now() - v.at > INFO_TTL) cmcInfoMemo.delete(k)
+        else if (cmcInfoMemo.size < 150) break
+      }
+    }
+  }
+  return items
+}
+
+async function applyCmcInfo(profile) {
+  const items = await recallCmcInfo(profile.symbol)
+  if (!items) return profile
+  const ca = String(profile.ca || '').toLowerCase()
+  const info =
+    items.find((i) => ca && String(i?.platform?.token_address || '').toLowerCase() === ca) ||
+    (ca ? null : items[0])
+  if (!info) return profile
+
+  const first = (list) => (Array.isArray(list) && list.length ? list[0] : null)
+  if (!profile.description && info.description) profile.description = String(info.description).trim()
+  if (!profile.logo && info.logo) profile.logo = info.logo
+  if (!(profile.categories || []).length && Array.isArray(info.tags) && info.tags.length) {
+    profile.categories = info.tags.slice(0, 8)
+  }
+
+  const urls = info.urls || {}
+  const boards = [
+    ...(Array.isArray(urls.chat) ? urls.chat : []),
+    ...(Array.isArray(urls.message_board) ? urls.message_board : []),
+    ...(Array.isArray(urls.social) ? urls.social : []),
+  ].map(String)
+  profile.website = profile.website || first(urls.website)
+  profile.explorer = profile.explorer || first(urls.explorer)
+  profile.github = profile.github || first(urls.source_code)
+  profile.twitter = profile.twitter || boards.find((u) => /twitter\.com|x\.com/i.test(u)) || null
+  profile.telegram = profile.telegram || boards.find((u) => /t\.me/i.test(u)) || null
+  profile.discord = profile.discord || boards.find((u) => /discord/i.test(u)) || null
+  if (!(Array.isArray(profile.websites) && profile.websites.length) && profile.website) {
+    profile.websites = normSites([profile.website])
+  }
   return profile
 }
 
@@ -956,6 +1025,27 @@ async function applyCoinGeckoTape(profile) {
   }
 }
 
+// Last-resort tape: public venue candles need no key, so they still answer when
+// this host is throttled by the free indexer tiers. A venue can list a COMPLETELY
+// different project under the same ticker, so the series is accepted only when
+// its last close agrees with the price the rest of the pipeline converged on —
+// the same three-times test every other cross-source check here already applies.
+async function applyVenueTape(profile) {
+  if ((profile.priceHistory || []).length) return
+  const sym = cleanSymbol(profile.symbol)
+  if (!sym) return
+
+  const found = await venueCandles(sym)
+  if (!found) return
+  const last = found.candles[found.candles.length - 1].price
+  if (profile.priceUsd > 0 && (last < profile.priceUsd / 3 || last > profile.priceUsd * 3)) return
+
+  profile.priceHistory = found.candles.map((c, i) => ({ i, t: c.t, price: c.price, volume: c.volume }))
+  profile.chartSource = 'live candles · hourly'
+  const first = profile.priceHistory[0].price
+  if (first > 0) profile.change32h = Math.round(((last - first) / first) * 10000) / 100
+}
+
 // ── Stale-while-error ────────────────────────────────────────────────────────
 // Public data APIs rate-limit shared cloud IPs hard. Anything we have once
 // confirmed about a contract's identity, artwork or copy is kept for hours, so a
@@ -1065,6 +1155,11 @@ async function hydrate(profile, candidates) {
   const canonIsThisAsset = !!canon && (caMatches || priceAgrees)
   applyGlobalCoinMetadata(profile, canonIsThisAsset ? canon : recallCoin(profile.cgCoinId))
   applyPairSocials(profile)
+  try {
+    await applyCmcInfo(profile)
+  } catch (err) {
+    console.warn('[tokenResolver] keyed metadata enrichment skipped:', err.message)
+  }
 
   // Headline metrics come from the global aggregate market, never from one
   // isolated pool: a bridge vault's "$25 volume" must not reach a dashboard.
@@ -1090,6 +1185,16 @@ async function hydrate(profile, candidates) {
       await applyCoinGeckoTape(profile)
     } catch (err) {
       console.warn('[tokenResolver] coingecko chart retry skipped:', err.message)
+    }
+  }
+
+  // Both indexer tapes can be silent at once — a key-free venue still has real
+  // hourly candles, so the price-action panel never has to render empty.
+  if (!(profile.priceHistory || []).length) {
+    try {
+      await applyVenueTape(profile)
+    } catch (err) {
+      console.warn('[tokenResolver] venue chart skipped:', err.message)
     }
   }
 
@@ -1180,8 +1285,23 @@ async function resolveByCa(ca, { matchType = 'contract', candidates = null } = {
   const groups = groupPairs(mine.length ? mine : pairs.filter((p) => p?.baseToken))
 
   if (groups.length) {
-    const canon = await canonicalCoin(cleanSymbol(groups[0].pair?.baseToken?.symbol))
-    const canonicalPrice = num(canon?.market_data?.current_price?.usd) || null
+    const sym0 = cleanSymbol(groups[0].pair?.baseToken?.symbol)
+    const canon = await canonicalCoin(sym0)
+    let canonicalPrice = num(canon?.market_data?.current_price?.usd) || null
+    if (!canonicalPrice) {
+      // CoinGecko is throttled from shared cloud IPs; the keyed CMC quote still
+      // pins the real tape so quote-token-priced broken pools get vetoed here.
+      try {
+        const rawItem = (await cmcQuote(sym0))?.data?.[sym0]
+        const items = Array.isArray(rawItem) ? rawItem : rawItem ? [rawItem] : []
+        const item = items
+          .slice()
+          .sort((a, b) => (num(a.cmc_rank) || 1e9) - (num(b.cmc_rank) || 1e9))[0]
+        canonicalPrice = num(item?.quote?.USD?.price) || null
+      } catch (err) {
+        console.warn('[tokenResolver] cmc price anchor skipped:', err.message)
+      }
+    }
     const pick = pickVettedGroup(groups, canonicalPrice)
     const profile = identityFromPair(pick.pair)
     profile.ca = ca

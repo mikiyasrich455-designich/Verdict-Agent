@@ -400,3 +400,107 @@ export function cmcQuote(symbols) {
   }
   return attempt(fetchQuote, `cmc quote ${syms.join(',')}`)
 }
+
+// Keyed CMC metadata: description, logo, links, tags. The backup identity
+// source when CoinGecko throttles a shared cloud IP.
+export function cmcInfo(symbol) {
+  const key = process.env.CMC_API_KEY
+  const sym = cleanSymbol(symbol)
+  if (!key || !sym) return Promise.resolve(null)
+
+  const url = `${CMC_BASE}/cryptocurrency/info?symbol=${encodeURIComponent(sym)}`
+  const fetchInfo = async () => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { ...JSON_HEADERS, 'X-CMC_PRO_API_KEY': key },
+      })
+      if (!res.ok) throw new Error(`cmc info HTTP ${res.status}`)
+      return await res.json()
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return attempt(fetchInfo, `cmc info ${sym}`)
+}
+
+// ── Key-free venue candles ──────────────────────────────────────────────────
+// The free indexer tiers throttle a shared cloud IP hard, which would leave the
+// price-action panel with no chart at all. Public exchange market-data endpoints
+// need no key and keep answering, so they are the last resort for a REAL tape —
+// never a synthesised one. Each venue returns a different row shape and a
+// different sort order, so normalise to {t: ms, price: close, volume} ascending
+// and let the caller veto any series that disagrees with the price every other
+// source already converged on (one venue can list a different project under the
+// very same ticker).
+const VENUE_CANDLE_SOURCES = [
+  {
+    name: 'binance',
+    url: (s) => `https://data-api.binance.vision/api/v3/klines?symbol=${s}USDT&interval=1h&limit=48`,
+    rows: (j) => (Array.isArray(j) ? j : []),
+    row: (r) => ({ t: Number(r[0]), price: Number(r[4]), volume: Number(r[7]) || Number(r[5]) }),
+  },
+  {
+    name: 'okx',
+    url: (s) => `https://www.okx.com/api/v5/market/candles?instId=${s}-USDT&bar=1H&limit=48`,
+    rows: (j) => (Array.isArray(j?.data) ? j.data : []),
+    row: (r) => ({ t: Number(r[0]), price: Number(r[4]), volume: Number(r[6]) || Number(r[5]) }),
+  },
+  {
+    name: 'bybit',
+    url: (s) => `https://api.bybit.com/v5/market/kline?category=spot&symbol=${s}USDT&interval=60&limit=48`,
+    rows: (j) => (Array.isArray(j?.result?.list) ? j.result.list : []),
+    row: (r) => ({ t: Number(r[0]), price: Number(r[4]), volume: Number(r[6]) || Number(r[5]) }),
+  },
+  {
+    name: 'gate',
+    url: (s) => `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${s}_USDT&interval=1h&limit=48`,
+    rows: (j) => (Array.isArray(j) ? j : []),
+    row: (r) => ({ t: Number(r[0]) * 1000, price: Number(r[2]), volume: Number(r[1]) }),
+  },
+  {
+    name: 'kucoin',
+    url: (s) => `https://api.kucoin.com/api/v1/market/candles?type=1hour&symbol=${s}-USDT`,
+    rows: (j) => (Array.isArray(j?.data) ? j.data : []),
+    row: (r) => ({ t: Number(r[0]) * 1000, price: Number(r[2]), volume: Number(r[6]) || Number(r[5]) }),
+  },
+]
+
+export async function venueCandles(symbol) {
+  const sym = cleanSymbol(symbol)
+  if (!sym) return null
+
+  for (const src of VENUE_CANDLE_SOURCES) {
+    let rows = []
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 7000)
+      try {
+        const res = await fetch(src.url(sym), { signal: ctrl.signal, headers: JSON_HEADERS })
+        if (!res.ok) continue
+        rows = src.rows(await res.json())
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch (err) {
+      console.warn(`[marketData] ${src.name} candles skipped:`, err.message)
+      continue
+    }
+
+    const candles = rows
+      .map((r) => {
+        try {
+          return src.row(r)
+        } catch {
+          return null
+        }
+      })
+      .filter((c) => c && Number.isFinite(c.t) && c.t > 0 && Number.isFinite(c.price) && c.price > 0)
+      .sort((a, b) => a.t - b.t)
+      .slice(-32)
+    if (candles.length > 3) return { venue: src.name, candles }
+  }
+  return null
+}
