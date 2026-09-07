@@ -12,7 +12,7 @@ import { fetchVerdict } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
-import BookLoader from '../../components/loaders/BookLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, ProgressMeter, TONES,
@@ -48,7 +48,7 @@ function scoreTone(score) {
 function DeepSkeleton() {
   return (
     <div className="flex min-h-[62vh] items-center justify-center">
-      <BookLoader />
+      <PercentLoader label="Opening the deep research file" />
     </div>
   )
 }
@@ -56,7 +56,7 @@ function DeepSkeleton() {
 function RunningFlow() {
   return (
     <div className="flex min-h-[62vh] items-center justify-center">
-      <BookLoader />
+      <PercentLoader label="Deep research running" />
     </div>
   )
 }

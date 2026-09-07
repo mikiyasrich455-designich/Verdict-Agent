@@ -10,7 +10,7 @@ import {
 } from '../../components/ConsoleUI'
 import { getStoredToken } from '../../components/DashboardShell'
 import { stanceOf } from '../../lib/stance'
-import BookLoader from '../../components/loaders/BookLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 
 const REGIME_TONE = { 'risk-on': 'up', neutral: 'amber', 'risk-off': 'down' }
 // Stance tone → ConsoleUI tone bridge: POSITIVE reads teal-up, NEUTRAL amber, CAUTION red-down.
@@ -31,7 +31,7 @@ function StancePill({ label, tone }) {
 function MarketSkeleton() {
   return (
     <div className="flex min-h-[62vh] items-center justify-center">
-      <BookLoader />
+      <PercentLoader label="Reading live market structure" />
     </div>
   )
 }

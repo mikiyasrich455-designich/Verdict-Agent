@@ -2384,3 +2384,24 @@ h1, h2, h3, h4 {
 
 .kol-card .cv-source { margin-bottom: 0; }
 
+/* ── PercentLoader — agent opening state with a live percentage ── */
+.pct-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.pct-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 30px; font-weight: 700; color: #eef3ff;
+  letter-spacing: -0.02em; line-height: 1;
+}
+.pct-sign { font-size: 15px; font-weight: 600; color: #7c89b0; margin-left: 2px; }
+.pct-bar { width: 190px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.pct-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #4e8bff, #7c5cff);
+  box-shadow: 0 0 12px rgba(78, 139, 255, 0.55);
+  transition: width 0.25s ease;
+}
+.pct-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: #7c89b0; text-align: center;
+}
+

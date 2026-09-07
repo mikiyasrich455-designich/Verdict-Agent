@@ -11,7 +11,7 @@ import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
 import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
-import CandleLoader from '../../components/loaders/CandleLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, LivePill, ProgressMeter, TONES,
@@ -168,7 +168,7 @@ function Loading() {
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
       <div className="cv-panel flex min-h-[46vh] flex-col items-center justify-center px-6 py-9">
-        <CandleLoader />
+        <PercentLoader label="Sweeping KOL voices" />
       </div>
     </div>
   )

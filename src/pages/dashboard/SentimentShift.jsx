@@ -9,7 +9,7 @@ import {
   MicroLabel, LivePill, TONES,
 } from '../../components/ConsoleUI'
 import { ErrorState } from '../../components/DashUI'
-import BookLoader from '../../components/loaders/BookLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 
 const DIR_META = {
   'risk-on rotation': { icon: TrendingUp, cls: 'text-success', note: 'Confidence is rotating in. Momentum playbooks get the green light, but watch for crowded positioning near the top of the drift.' },
@@ -97,7 +97,7 @@ function SentimentChart({ series, tone }) {
 function Loading() {
   return (
     <div className="flex min-h-[62vh] items-center justify-center">
-      <BookLoader />
+      <PercentLoader label="Scanning social & sentiment flow" />
     </div>
   )
 }

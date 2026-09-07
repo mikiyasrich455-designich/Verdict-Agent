@@ -14,7 +14,7 @@ import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import { BullMascot, BearMascot } from '../../components/CouncilMascots'
 import { CouncilLoader } from '../../components/ShadcnLoaders'
-import CandleLoader from '../../components/loaders/CandleLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, AgentRow,
   MicroLabel, LivePill, ProgressMeter, TONES,
@@ -89,7 +89,7 @@ function CouncilLoading() {
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
       <div className="cv-panel flex min-h-[46vh] flex-col items-center justify-center px-6 py-9">
-        <CandleLoader />
+        <PercentLoader label="Seating the bull & bear desks" />
       </div>
     </div>
   )

@@ -19,7 +19,7 @@ import {
   TokenLogo, MicroLabel, TONES,
 } from '../../components/ConsoleUI'
 import { ErrorState, fmtUsd, fmtPrice, fmtPct, fmtNum } from '../../components/DashUI'
-import BookLoader from '../../components/loaders/BookLoader'
+import PercentLoader from '../../components/loaders/PercentLoader'
 
 function CopyChip({ value }) {
   const [done, setDone] = useState(false)
@@ -212,7 +212,7 @@ function sanitizeProfile(d) {
 function Loading() {
   return (
     <div className="flex min-h-[62vh] items-center justify-center">
-      <BookLoader />
+      <PercentLoader label="Crunching on-chain & fundamentals" />
     </div>
   )
 }
