@@ -621,7 +621,7 @@ export default function DashboardShell() {
       {/* main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setDrawer(true)} />
-        <div className="flex min-h-0 flex-1">
+        <div className="cv-shellrow flex min-h-0 flex-1">
           <main className="min-w-0 flex-1 overflow-y-auto">
             <motion.div
               key={pathname}

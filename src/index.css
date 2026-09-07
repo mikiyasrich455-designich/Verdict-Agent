@@ -2134,7 +2134,10 @@ h1, h2, h3, h4 {
   color: #c6d4f2; font-size: 12.5px; font-weight: 500; cursor: pointer; text-decoration: none;
 }
 .cv-menu-item:hover { background: rgba(110, 168, 255, 0.12); color: #fff; }
-.cv-rail { width: 344px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 18px 18px 0; overflow-y: auto; }
+/* display is owned by CSS alone (not Tailwind) so the rail can never be
+   squeezed into the page column on small screens */
+.cv-rail { width: 344px; flex-shrink: 0; display: none; flex-direction: column; gap: 14px; padding: 18px 18px 18px 0; overflow-y: auto; }
+@media (min-width: 1280px) { .cv-rail { display: flex; } }
 .cv-tabs { display: flex; padding: 3px; border-radius: 11px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(126, 156, 255, 0.14); }
 .cv-tab { flex: 1; padding: 7px 10px; border-radius: 9px; border: none; background: transparent; color: #93a1c4; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.16s ease; }
 .cv-tab.on { color: #fff; background: linear-gradient(92deg, rgba(78, 139, 255, 0.9), rgba(124, 92, 255, 0.82)); box-shadow: 0 4px 14px rgba(78, 139, 255, 0.35); }
@@ -2157,7 +2160,19 @@ h1, h2, h3, h4 {
    PHONE PASS — the console must read like a mobile app: nothing
    chopped, nothing overflowing off-screen, every control reachable.
    ══════════════════════════════════════════════════════════════════ */
+
+/* below xl the right rail joins the page flow instead of stealing width:
+   page content first, live intelligence stacked under it, one clean scroll */
+@media (max-width: 1279px) {
+  .cv-shellrow { flex-direction: column; overflow-y: auto; }
+  .cv-shellrow > main { flex: 0 0 auto; overflow: visible; }
+  .cv-rail { display: flex; width: 100%; padding: 2px 16px 26px; overflow: visible; }
+}
+
 @media (max-width: 640px) {
+  /* hero breathes on a phone: tighter pad, same artwork */
+  .cv-hero { padding: 22px 18px; border-radius: 18px; }
+
   /* topbar stacks: controls on row one, full-width search on row two */
   .cv-topbar {
     height: auto; min-height: 60px;
