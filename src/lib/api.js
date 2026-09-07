@@ -88,7 +88,7 @@ function request(path, body, { ttl = 90000, label = 'Request', cacheIf } = {}) {
       throw new Error(err.error || `${label} failed`)
     }
     const value = await res.json()
-    cacheStore.set(key, { at: Date.now(), value })
+    if (!cacheIf || cacheIf(value)) cacheStore.set(key, { at: Date.now(), value })
     return value
   })().finally(() => inflight.delete(key))
 
@@ -169,7 +169,13 @@ export function fetchStudioScript(symbol) {
 // The client gathers the agents itself (so the UI can track each one), then hands
 // the payloads over — the server never re-fetches, it just reconciles.
 export function fetchFinal(symbol, agents) {
-  return request('/api/proxy/synthesis/final', withIdentity({ symbol, agents }), { ttl: 600000, label: 'Final recommendation' })
+  // A degraded (arithmetic) desk read is never cached: the next pass retries
+  // the full judge synthesis instead of pinning the weak answer to the screen.
+  return request('/api/proxy/synthesis/final', withIdentity({ symbol, agents }), {
+    ttl: 600000,
+    label: 'Final recommendation',
+    cacheIf: (v) => !v?.degraded,
+  })
 }
 
 // POST /api/proxy/studio/image → Qwen image (wan2.7-image). The prompt is built

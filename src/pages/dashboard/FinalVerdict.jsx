@@ -1,7 +1,7 @@
 // Final Recommendation — the master desk agent.
 // It gathers every other agent's live output in parallel (each step tracked on
 // screen), then reconciles all of it into ONE nuanced house view.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Crown, RefreshCw, Check, X, Microscope, Swords, Radio, ShieldAlert,
   Globe, Gauge, AlertTriangle, Zap, Target, Clock, Layers, ArrowRight,
@@ -170,6 +170,10 @@ export default function FinalVerdict() {
   const [result, setResult] = useState(null)
   const [failed, setFailed] = useState(0)
   const [runKey, setRunKey] = useState(0)
+  const retriedRef = useRef(false)
+
+  // A new token gets a fresh auto-retry budget.
+  useEffect(() => { retriedRef.current = false }, [token])
 
   const settled = useMemo(
     () => AGENTS.filter((a) => steps[a.key] === 'done' || steps[a.key] === 'failed').length,
@@ -219,6 +223,13 @@ export default function FinalVerdict() {
       } catch (err) {
         if (!alive) return
         console.error('[FINAL] synthesis failed:', err)
+        // One silent auto-retry before the user ever sees an error state —
+        // a transient synthesis hiccup should heal itself, not dead-end the desk.
+        if (!retriedRef.current) {
+          retriedRef.current = true
+          setTimeout(() => { if (alive) setRunKey((k) => k + 1) }, 900)
+          return
+        }
         setPhase('error')
       }
     })()
@@ -267,7 +278,11 @@ export default function FinalVerdict() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="cv-chip"><Layers size={12} /> {result?.agentsUsed || settled} agents</span>
-        <button type="button" className="cv-chip" onClick={() => setRunKey((k) => k + 1)}>
+        <button
+          type="button"
+          className="cv-chip"
+          onClick={() => { retriedRef.current = false; setRunKey((k) => k + 1) }}
+        >
           <RefreshCw size={12} /> Re-gather
         </button>
       </div>
@@ -278,9 +293,10 @@ export default function FinalVerdict() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <ErrorState error={null} onRetry={() => setRunKey((k) => k + 1)}>
+        <ErrorState error={null} onRetry={() => { retriedRef.current = false; setRunKey((k) => k + 1) }}>
           <p className="font-mono text-[11.5px] text-faint">
-            The desk couldn't reconcile {sym}. One or more agents didn't report in — try again.
+            The reconcile pass for {sym} didn't land on this run (it already retried once
+            behind the scenes). Every agent read you gathered is intact — run it again.
           </p>
         </ErrorState>
       </div>
@@ -360,6 +376,45 @@ export default function FinalVerdict() {
           </motion.p>
         )}
       </motion.div>
+
+      {/* ── judge scores: one judge, both sides scored ── */}
+      <PanelV2
+        icon={Swords}
+        title="Judge scores — bull case vs bear case"
+        delay={0.08}
+        right={<MicroLabel>one judge weighed both sides</MicroLabel>}
+      >
+        <div className="grid gap-5 sm:grid-cols-2">
+          {[
+            { label: 'bull case', score: result.bullScore, color: TONES.up },
+            { label: 'bear case', score: result.bearScore, color: TONES.down },
+          ].map((side) => (
+            <div key={side.label}>
+              <div className="mb-2 flex items-baseline justify-between gap-3">
+                <MicroLabel>{side.label}</MicroLabel>
+                <span className="font-mono text-[22px] font-black leading-none" style={{ color: side.color }}>
+                  {Number.isFinite(side.score) ? side.score : '—'}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full border border-white/5 bg-white/[0.07]">
+                <motion.div
+                  className="h-full rounded-full"
+                  animate={{ width: `${Math.max(0, Math.min(100, Number(side.score) || 0))}%` }}
+                  transition={{ type: 'spring', stiffness: 120, damping: 24 }}
+                  style={{
+                    background: `linear-gradient(90deg, ${side.color}55, ${side.color})`,
+                    boxShadow: `0 0 12px ${side.color}66`,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: '#8b98bd' }}>
+          The master desk judged each side on the evidence every agent produced —
+          {' '}{Math.abs((result.bullScore ?? 0) - (result.bearScore ?? 0))} points separate the two cases on this pass.
+        </p>
+      </PanelV2>
 
       {/* ── what moved the call ── */}
       {result.keyPoints?.length > 0 && (

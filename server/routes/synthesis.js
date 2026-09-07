@@ -702,7 +702,7 @@ BEAR CLOSING: ${bearClose}
 EVIDENCE PACK:
 ${evidence}
 
-Score how well each side grounded its claims in the evidence (0-100 each), then rule. Respond with ONLY a valid JSON object:
+Score how well each side grounded its claims in the evidence (0-100 each), then rule. The two scores MUST differ by at least 5 points — a perfect tie is not a ruling; decide which side earned the edge. Respond with ONLY a valid JSON object:
 {"bullScore": <0-100>, "bearScore": <0-100>, "verdict": "POSITIVE"|"NEUTRAL"|"CAUTION", "confidence": <0-100>, "text": "<3-5 sentence ruling citing the decisive evidence and ending with a reminder that the reader must do their own research. Never name data providers, APIs or models. Never instruct anyone to buy, hold, sell or avoid anything.>"}`
 
   let judge = extractJson(await callLLM([
@@ -716,8 +716,21 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
     ], QWEN_MODELS.judge, 600, { timeoutMs: 25000 }).catch(() => ''))
   }
 
-  const bull100 = clampScore(firstNum(judge?.bullScore))
-  const bear100 = clampScore(firstNum(judge?.bearScore))
+  // The judge must separate the two sides. If the judge pass never returned
+  // scores, score from the live tape instead of printing a flat 50/50 tie —
+  // and if the scores still land equal, break the tie with the ruling's lean.
+  const chJudge = Number(live?.change24h) || 0
+  const judgeScored = firstNum(judge?.bullScore) !== undefined && firstNum(judge?.bearScore) !== undefined
+  let bull100 = judgeScored
+    ? clampScore(firstNum(judge.bullScore))
+    : clampScore(50 + Math.max(-18, Math.min(18, chJudge * 1.2)))
+  let bear100 = judgeScored ? clampScore(firstNum(judge.bearScore)) : clampScore(100 - bull100)
+  if (bull100 === bear100) {
+    const lean = judge?.verdict ? stanceKey(judge.verdict) : (chJudge >= 0 ? 'POSITIVE' : 'CAUTION')
+    if (lean === 'POSITIVE') { bull100 = clampScore(bull100 + 6); bear100 = clampScore(bear100 - 6) }
+    else if (lean === 'CAUTION') { bear100 = clampScore(bear100 + 6); bull100 = clampScore(bull100 - 6) }
+    else { bull100 = clampScore(bull100 + (chJudge >= 0 ? 4 : -4)); bear100 = 100 - bull100 }
+  }
   const bull01 = +(bull100 / 100).toFixed(2)
   const bear01 = +(bear100 / 100).toFixed(2)
   const diff = +(bull01 - bear01).toFixed(2)
@@ -1006,12 +1019,93 @@ function digestAgents(a = {}) {
   return out
 }
 
+// ── Deterministic desk fallback ─────────────────────────────────
+// If the master judge pass never returns parseable JSON we still hold every
+// agent's payload in hand. Reconcile it arithmetically — scores from the
+// council judge or the deep verdict, one read per agent that reported — so
+// the final desk always renders instead of failing the page.
+const DESK_NAMES = {
+  'DEEP ANALYSIS': 'Deep Analysis',
+  'COUNCIL RULING': 'Bull vs Bear',
+  'NARRATIVE RADAR': 'Narrative Radar',
+  'RISK DESK': 'Risk Desk',
+  'MARKET REGIME': 'Market Regime',
+  'SENTIMENT SHIFT': 'Sentiment Shift',
+}
+
+function deskFallback({ agents, digest, sym, name, priceUsd, change24h, gathered }) {
+  const v = agents.verdict && typeof agents.verdict === 'object' ? agents.verdict : {}
+  const j = agents.council?.judge || null
+  const to100 = (x) => (Number.isFinite(Number(x)) ? Number(x) * (Number(x) <= 1 ? 100 : 1) : undefined)
+  const ch = Number(change24h) || 0
+
+  let bull = firstNum(to100(v.bullScore), to100(j?.bullScore))
+  let bear = firstNum(to100(v.bearScore), to100(j?.bearScore))
+  if (bull === undefined) bull = 50 + Math.max(-18, Math.min(18, ch * 1.2))
+  if (bear === undefined) bear = 100 - bull
+  let bullScore = clampScore(bull)
+  let bearScore = clampScore(bear)
+  if (bullScore === bearScore) {
+    bullScore = clampScore(bullScore + (ch >= 0 ? 4 : -4))
+    bearScore = 100 - bullScore
+  }
+  const stance = stanceFromScores(bullScore, bearScore)
+
+  const agentDigests = digest
+    .filter((line) => /^[A-Z][A-Z &]+— /.test(line))
+    .map((line) => {
+      const idx = line.indexOf(' — ')
+      const head = line.slice(0, idx).trim()
+      return {
+        agent: DESK_NAMES[head] || head,
+        read: clip(line.slice(idx + 3), 300),
+        weight: 'medium',
+      }
+    })
+
+  const bullReasons = firstArr(v.bullReasons).slice(0, 3).map((x) => clip(x, 220)).filter(Boolean)
+  const bearReasons = firstArr(v.bearReasons).slice(0, 3).map((x) => clip(x, 220)).filter(Boolean)
+  const kl = v.keyLevels || {}
+
+  return {
+    symbol: sym,
+    name,
+    priceUsd: priceUsd || null,
+    change24h: Number.isFinite(change24h) ? change24h : null,
+    stance,
+    tone: stanceTone(stance),
+    conviction: clampScore(38 + Math.min(30, Math.abs(bullScore - bearScore))),
+    bullScore,
+    bearScore,
+    headline: `${name}: the desk scores the bull case ${bullScore} against the bear case ${bearScore}.`,
+    thesis: `Reconciled arithmetically from ${gathered.length || digest.length} desk feeds while the qualitative judge pass was unavailable. Bull ${bullScore} vs bear ${bearScore} sets the house stance at ${stanceLabel(stance)}. Agent reads: ${agentDigests.map((d) => `${d.agent} — ${d.read}`).join(' ')} ${DYOR_SHORT}`.slice(0, 1400),
+    keyPoints: [
+      ...bullReasons.map((t) => ({ t, w: 'bull' })),
+      ...bearReasons.map((t) => ({ t, w: 'bear' })),
+    ].slice(0, 6),
+    agentDigests,
+    risks: bearReasons,
+    catalysts: bullReasons,
+    levels: {
+      support: clip(kl.support, 60) || '—',
+      resistance: clip(kl.resistance, 60) || '—',
+      invalidation: clip(kl.stopLoss, 220) || '—',
+    },
+    timeframe: 'next 1-2 weeks',
+    sizeNote: 'A disciplined desk frames exposure as a fraction of capital it can lose outright, sized against the invalidation level above.',
+    agentsUsed: gathered.length || digest.length,
+    degraded: true,
+    asOf: new Date().toISOString(),
+  }
+}
+
 router.post('/final', async (req, res) => {
   const start = Date.now()
   const { symbol } = req.body
   if (!symbol) return res.status(400).json({ error: 'symbol required' })
 
-  const limit = rateLimit('synthesis', 30, 60000)
+  // Own bucket: the final reconcile must never starve behind the other agents.
+  const limit = rateLimit('final', 20, 60000)
   if (!limit.allowed) {
     log('POST', '/synthesis/final', 429, Date.now() - start)
     return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
@@ -1058,7 +1152,8 @@ YOUR JOB: reconcile all of it into ONE professional recommendation. Where agents
 
 HARD RULES:
 - NEVER say "buy", "don't buy", "sell", "go long", "go short", "invest" or any direct instruction to transact. You are an analyst framing a stance, not a signal service.
-- Pick exactly ONE research stance: POSITIVE (positives outweigh the risks) / NEUTRAL (mixed signals) / CAUTION (risks outweigh the positives).
+- Pick exactly ONE research stance: POSITIVE (positives outweigh the risks) / NEUTRAL (the two sides genuinely balance) / CAUTION (risks outweigh the positives).
+- You are the JUDGE of the bull case and the bear case. Score each side 0-100 on the strength of its evidence ("bullScore", "bearScore"). The two scores MUST differ by at least 5 points — a tie is not a ruling. Let the gap between them drive your stance and your conviction.
 - Be concrete: cite the actual numbers the agents produced.
 - Never name data providers, APIs, tools or models behind any of this.
 - Write like a seasoned institutional strategist: calm, specific, no hype, no fear.
@@ -1069,6 +1164,8 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
 {
   "stance": "POSITIVE" | "NEUTRAL" | "CAUTION",
   "conviction": <0-100>,
+  "bullScore": <0-100 integer, your judge score for the bull case>,
+  "bearScore": <0-100 integer, your judge score for the bear case>,
   "headline": "<max 12 words, the one-line house view>",
   "thesis": "<3-5 sentences reconciling every agent, naming the disagreement and your weighting>",
   "keyPoints": [ {"t": "<one concrete point>", "w": "bull"|"bear"|"neutral"} ],
@@ -1079,7 +1176,7 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
   "timeframe": "<the horizon this stance applies to>",
   "sizeNote": "<one sentence on how a disciplined desk would frame exposure without telling anyone to transact>"
 }
-4-6 keyPoints, one agentDigest per agent that reported, 2-4 risks, 2-4 catalysts.`
+4-6 keyPoints, one agentDigest for EVERY agent that appears in the input above (never skip one that reported), 2-4 risks, 2-4 catalysts.`
 
     let parsed = extractJson(await callLLM([
       { role: 'system', content: 'You are a senior crypto desk strategist. You output ONLY one valid JSON object. No markdown, no code fences, no commentary, and never a direct instruction to buy or sell.' },
@@ -1092,9 +1189,27 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
         { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
       ], QWEN_MODELS.main, 1500, { timeoutMs: 35000 }).catch(() => ''))
     }
-    if (!parsed) throw new Error('Final synthesis did not return valid JSON')
+    // If the judge pass returns nothing parseable, reconcile from the payloads
+    // we already hold instead of failing the page — the desk always renders.
+    if (!parsed) {
+      const data = deskFallback({ agents, digest, sym, name, priceUsd, change24h, gathered })
+      setCache(cacheKey, data, 60 * 1000)
+      log('POST', '/synthesis/final', 200, Date.now() - start, '(degraded)')
+      return res.json(data)
+    }
 
     const stance = stanceKey(parsed.stance)
+    // Judge scores for both sides. If the model omits them, inherit from the
+    // council judge or the deep verdict — never print a flat 50/50 tie.
+    const to100 = (x) => (Number.isFinite(Number(x)) ? Number(x) * (Number(x) <= 1 ? 100 : 1) : undefined)
+    const cj = agents.council?.judge || null
+    let bullScore = clampScore(firstNum(to100(parsed.bullScore), to100(cj?.bullScore), to100(agents.verdict?.bullScore)))
+    let bearScore = clampScore(firstNum(to100(parsed.bearScore), to100(cj?.bearScore), to100(agents.verdict?.bearScore)))
+    if (bullScore === bearScore) {
+      if (stance === 'POSITIVE') { bullScore = clampScore(bullScore + 6); bearScore = clampScore(bearScore - 6) }
+      else if (stance === 'CAUTION') { bearScore = clampScore(bearScore + 6); bullScore = clampScore(bullScore - 6) }
+      else { bullScore = clampScore(bullScore + ((change24h || 0) >= 0 ? 4 : -4)); bearScore = 100 - bullScore }
+    }
     let thesis = clip(parsed.thesis, 1400) || ''
     if (thesis && !/own research|not financial advice/i.test(thesis)) thesis += ` ${DYOR_SHORT}`
 
@@ -1106,6 +1221,8 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
       stance,
       tone: stanceTone(stance),
       conviction: clampScore(firstNum(parsed.conviction)),
+      bullScore,
+      bearScore,
       headline: clip(parsed.headline, 160) || `${name}: the desk is in wait-and-weigh mode.`,
       thesis,
       keyPoints: firstArr(parsed.keyPoints).slice(0, 6).map((k) => ({

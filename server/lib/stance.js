@@ -5,7 +5,7 @@ export const STANCE_KEYS = ['POSITIVE', 'NEUTRAL', 'CAUTION']
 
 export const STANCES = {
   POSITIVE: { key: 'POSITIVE', label: 'Positive Bias', short: 'Positive', tag: 'POSITIVITY', tone: 'positive' },
-  NEUTRAL: { key: 'NEUTRAL', label: 'Mixed Signals', short: 'Mixed', tag: 'NEUTRAL', tone: 'neutral' },
+  NEUTRAL: { key: 'NEUTRAL', label: 'Balanced View', short: 'Balanced', tag: 'NEUTRAL', tone: 'neutral' },
   CAUTION: { key: 'CAUTION', label: 'Elevated Risk', short: 'Risk', tag: 'RISK', tone: 'risk' },
 }
 

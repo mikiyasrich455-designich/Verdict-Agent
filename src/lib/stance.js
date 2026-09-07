@@ -3,7 +3,7 @@
 // (BUY / HOLD / AVOID and friends) are mapped here so old data still renders.
 export const STANCES = {
   POSITIVE: { key: 'POSITIVE', label: 'Positive Bias', short: 'Positive', tag: 'POSITIVITY', tone: 'positive', hex: '#22c55e', blurb: 'Evidence leans constructive on this token right now.' },
-  NEUTRAL: { key: 'NEUTRAL', label: 'Mixed Signals', short: 'Mixed', tag: 'NEUTRAL', tone: 'neutral', hex: '#f59e0b', blurb: 'Evidence is two-sided — positives and risks are close to balanced.' },
+  NEUTRAL: { key: 'NEUTRAL', label: 'Balanced View', short: 'Balanced', tag: 'NEUTRAL', tone: 'neutral', hex: '#f59e0b', blurb: 'Evidence is two-sided — the bull case and the bear case both carry real weight right now.' },
   CAUTION: { key: 'CAUTION', label: 'Elevated Risk', short: 'Risk', tag: 'RISK', tone: 'risk', hex: '#ef4444', blurb: 'Evidence leans toward meaningful risk on this token right now.' },
 }
 
