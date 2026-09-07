@@ -8,7 +8,7 @@ import {
   TrendingUp, Globe, Crosshair, Microscope, Scale, Gauge,
   Gavel, Swords, Megaphone, Radio, Clapperboard, ImageIcon, Film, AudioWaveform,
   Cpu, ShieldAlert, History, LayoutDashboard, Menu, X,
-  Search, Sparkles, CornerDownLeft, ArrowLeft, Bell, Plus, ChevronDown, Gem, Activity, Crown,
+  Search, Sparkles, CornerDownLeft, ArrowLeft, Plus, Gem, Activity, Crown,
 } from 'lucide-react'
 import Logo from './Logo'
 import { resolveToken } from '../lib/api'
@@ -245,7 +245,6 @@ function Topbar({ onMenu }) {
     [focusToken, searchParams]
   )
   const [query, setQuery] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
   const found = useMemo(() => findSkill(pathname), [pathname])
   const isHome = pathname === '/dashboard'
 
@@ -390,38 +389,10 @@ function Topbar({ onMenu }) {
         </span>
       )}
 
-      <button type="button" className="cv-iconbtn" title="Live intelligence feed" aria-label="Live intelligence feed">
-        <Bell size={16} />
-        <span className="cv-bell-dot" />
-      </button>
-
       <Link to="/verdict" className="cv-btn !rounded-full !px-3 sm:!px-4 !py-2" title="New verdict">
         <Plus size={14} strokeWidth={2.6} />
         <span className="hidden sm:inline">New Verdict</span>
       </Link>
-
-      <div className="relative flex items-center">
-        <button type="button" className="cv-avatar" onClick={() => setMenuOpen((o) => !o)} aria-label="Account menu">
-          M
-        </button>
-        <ChevronDown size={13} className="ml-1 hidden text-[#66739A] sm:block" />
-        {menuOpen && (
-          <>
-            <div className="fixed inset-0 z-50" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-            <div className="cv-menu">
-              <Link className="cv-menu-item" to="/dashboard/history" onClick={() => setMenuOpen(false)}>
-                <History size={13} /> Decision history
-              </Link>
-              <Link className="cv-menu-item" to="/dashboard" onClick={() => setMenuOpen(false)}>
-                <LayoutDashboard size={13} /> Console home
-              </Link>
-              <Link className="cv-menu-item" to="/" onClick={() => setMenuOpen(false)}>
-                <Globe size={13} /> Landing page
-              </Link>
-            </div>
-          </>
-        )}
-      </div>
     </header>
   )
 }

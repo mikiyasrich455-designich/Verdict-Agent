@@ -1,15 +1,14 @@
 // Studio · Image — generates art via Qwen image model
 import { useState } from 'react'
-import { ImageIcon, RefreshCw, Download, Sparkles, Maximize2, Type } from 'lucide-react'
+import { ImageIcon, Wand2, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import VerdictBadge from '../../components/VerdictBadge'
-import { useAgentData } from '../../hooks/useAgentData'
+import VerdictBadge, { verdictColor } from '../../components/VerdictBadge'
+import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioImage } from '../../lib/api'
-import { PageHeader, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
-import GenLoader from '../../components/loaders/GenLoader'
-import CandleLoader from '../../components/loaders/CandleLoader'
-import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, coverFor } from './StudioShared'
+import { PageHeader, Panel, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
+import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
+import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn, STUDIO_COVER, coverFor } from './StudioShared'
 
 export default function ImageStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -25,21 +24,10 @@ function ImageStudioInner({ token, pick }) {
   const [error, setError] = useState(null)
   const [output, setOutput] = useState(null)
 
-  const header = (
-    <PageHeader
-      icon={ImageIcon}
-      title={script ? `Studio · Image · ${script.symbol}` : 'Studio · Image'}
-      subtitle="Turn a verdict into shareable card art."
-      source={{ mode: 'live', name: 'AI image' }}
-    >
-      {script && <VerdictBadge verdict={script.verdict} size="sm" animate={false} />}
-    </PageHeader>
-  )
-
   if (!token) {
     return (
       <>
-        {header}
+        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
         <EmptyState
           icon={ImageIcon}
           title="Set a token first"
@@ -53,7 +41,7 @@ function ImageStudioInner({ token, pick }) {
   if (status === 'error') {
     return (
       <>
-        {header}
+        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
         <ErrorState error={fetchError} onRetry={() => window.location.reload()}>
           <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
         </ErrorState>
@@ -64,10 +52,8 @@ function ImageStudioInner({ token, pick }) {
   if (status !== 'ready' || !script) {
     return (
       <>
-        {header}
-        <div className="min-h-[46vh] flex items-center justify-center">
-          <CandleLoader />
-        </div>
+        <PageHeader icon={ImageIcon} title="Studio · Image" subtitle="Turn a verdict into shareable card art." source={{ mode: 'live', name: 'AI image' }} />
+        <PageSkeleton />
       </>
     )
   }
@@ -93,73 +79,83 @@ function ImageStudioInner({ token, pick }) {
 
   return (
     <>
-      {header}
+      <PageHeader
+        icon={ImageIcon}
+        title={`Studio · Image · ${script.symbol}`}
+        subtitle="Turn a verdict into shareable card art."
+        source={{ mode: 'live', name: 'AI image' }}
+      >
+        <VerdictBadge verdict={script.verdict} size="sm" animate={false} />
+      </PageHeader>
 
-      <div className="cv-panel st-panel">
-        {/* the stage — art on top, loader centered while rendering */}
-        <div className="st-stage">
-          <AnimatePresence mode="wait">
-            {phase === 'generating' && (
-              <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-full flex items-center justify-center">
-                <GenLoader />
-              </motion.div>
-            )}
-            {phase === 'done' && output && (
-              <motion.div key="out" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full h-full">
-                <img src={output.url} alt={`${output.symbol} verdict art`} className="st-media contain" />
-              </motion.div>
-            )}
-            {phase === 'idle' && !error && (
-              <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6">
-                <p className="text-[13px] text-muted">Your card art appears here.</p>
-              </motion.div>
-            )}
-            {error && (
-              <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
-                <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
-                <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* three compact tiles: view · format · save */}
-        <div className="st-tiles">
-          <button
-            type="button"
-            className="st-tile"
-            disabled={phase !== 'done'}
-            onClick={() => output && window.open(output.url, '_blank', 'noopener')}
-          >
-            <Maximize2 size={16} />
-            <span className="st-tile-value">View</span>
-            <span className="st-tile-label">full size</span>
-          </button>
-          <div className="st-tile info">
-            <Type size={16} />
-            <span className="st-tile-value">{output?.format ? output.format.toUpperCase() : '—'}</span>
-            <span className="st-tile-label">format</span>
+      <div className="grid lg:grid-cols-5 gap-4">
+        {/* image brief — prompt is generated behind the scenes, never shown here */}
+        <Panel title="Image Brief" icon={Wand2} delay={0.08} className="lg:col-span-2">
+          <div className="space-y-4">
+            <div>
+              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Concept</p>
+              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Clean, professional analysis result card for the verdict</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="glass-chip">1:1 · 1024px</span>
+            </div>
+            <div className="pt-2 border-t border-white/5">
+              <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
+              <button onClick={generate} disabled={phase === 'generating'} className="glass-btn w-full justify-center !py-3">
+                <Wand2 size={14} /> {phase === 'generating' ? 'Generating…' : output ? 'Regenerate Image' : 'Generate Image'}
+              </button>
+            </div>
           </div>
-          <button type="button" className="st-tile" disabled={phase !== 'done'} onClick={() => output && download(output)}>
-            <Download size={16} />
-            <span className="st-tile-value">Save</span>
-            <span className="st-tile-label">{output?.format || 'img'}</span>
-          </button>
-        </div>
+        </Panel>
 
-        {/* one brief line + one CTA */}
-        <p className="st-brief">Turn {script.symbol}&apos;s live verdict into card art worth sharing.</p>
-        <button type="button" className="st-cta" onClick={generate} disabled={phase === 'generating'}>
-          <Sparkles size={15} /> {phase === 'generating' ? 'Generating…' : output ? 'Generate Again' : 'Generate Now'}
-        </button>
+        {/* canvas */}
+        <div className="lg:col-span-3">
+          <div className="studio-frame studio-vignette min-h-[320px] flex items-center justify-center">
+            <AnimatePresence mode="wait">
+              {phase === 'generating' && (
+                <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-[320px] flex flex-col items-center justify-center gap-4">
+                  <OrbitLoader label="Generating image…" />
+                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">PLEASE WAIT · THIS MAY TAKE A MOMENT</p>
+                </motion.div>
+              )}
+              {phase === 'done' && output && (
+                <motion.div key="out" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full">
+                  <img src={output.url} alt={`${output.symbol} verdict art`} className="w-full" />
+                </motion.div>
+              )}
+              {phase === 'idle' && !error && (
+                <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-full min-h-[320px] relative">
+                  <img src={STUDIO_COVER} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover rounded-lg opacity-45" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
+                    <div className="empty-icon mx-auto mb-4"><ImageIcon size={22} /></div>
+                    <p className="text-[13px] text-snow/90">The canvas is empty. Generate to paint the verdict.</p>
+                  </div>
+                </motion.div>
+              )}
+              {error && (
+                <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
+                  <div className="empty-icon mx-auto mb-4"><ImageIcon size={22} className="text-danger" /></div>
+                  <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
+                  <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {phase === 'done' && output && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 mt-3">
+              <DownloadBtn onClick={() => download(output)} label={`Download .${output.format}`} />
+              <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
+            </motion.div>
+          )}
+        </div>
       </div>
 
-      <StudioHistoryStrip
-        items={history.items}
-        activeId={output?.id}
-        onPick={(it) => { setOutput(it); setPhase('done') }}
-        renderThumb={(it) => ({ backgroundImage: `url(${coverFor(it.url)})` })}
-      />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <StudioHistoryStrip items={history.items} activeId={output?.id} onPick={(it) => { setOutput(it); setPhase('done') }} renderThumb={(it) => ({ backgroundImage: `url(${coverFor(it.url)})` })} />
+        </div>
+      </div>
     </>
   )
 }

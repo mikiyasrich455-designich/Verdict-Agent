@@ -64,8 +64,14 @@ function Loading() {
       <div className="cv-grid-stats">
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
-      <div className="cv-panel flex min-h-[46vh] flex-col items-center justify-center px-6 py-9">
-        <CandleLoader />
+      <div className="cv-panel flex flex-col items-center px-6 py-9">
+        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
+          <span className="font-mono text-sm">re-checking the gates…</span>
+        </div>
+        <p className="mt-4 font-mono text-[10px] tracking-[0.2em]" style={{ color: '#66739a' }}>
+          SIZING · STOPS · CONVICTION
+        </p>
       </div>
       <div className="cv-panel cv-ghost h-[240px]" />
     </div>

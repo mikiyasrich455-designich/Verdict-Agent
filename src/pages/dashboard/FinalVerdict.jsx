@@ -128,9 +128,8 @@ function GatherPanel({ symbol, steps, settled, total, phase }) {
       className="cv-panel px-6 py-8 sm:px-9 sm:py-11"
     >
       <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
-        <CandleLoader />
         <motion.span
-          className="mt-2 grid h-14 w-14 place-items-center rounded-2xl"
+          className="grid h-14 w-14 place-items-center rounded-2xl"
           style={{ color: TONES.amber, background: 'rgba(255,194,75,0.13)', border: '1px solid rgba(255,194,75,0.3)' }}
           animate={{ boxShadow: ['0 0 0px rgba(255,194,75,0)', '0 0 34px rgba(255,194,75,0.4)', '0 0 0px rgba(255,194,75,0)'] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
