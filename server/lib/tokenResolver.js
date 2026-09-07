@@ -259,7 +259,21 @@ async function globalMarketOverlay(profile) {
 
   // Same ticker on an unrelated asset: the aggregate price must agree with the
   // contract-bound tape within 3x, or a lookalike's global stats would leak in.
-  if (profile.priceUsd > 0 && g.price > 0 && (g.price < profile.priceUsd / 3 || g.price > profile.priceUsd * 3)) {
+  // But a lone DEX pool quoted in a non-major token is a dead/broken pool, not a
+  // trustworthy tape — when the keyed global aggregate disagrees by >3x there,
+  // the aggregate is the authority. This is what turns "JUP / METEORA at $928"
+  // (quote token MET, one uncorroborated observation) into the real Jupiter tape.
+  const dexQuote = cleanSymbol(profile.quoteSymbol)
+  const brokenPool = !!dexQuote && !MAJOR_QUOTES.has(dexQuote)
+  const corroborated =
+    (Array.isArray(profile.priceObservations) ? profile.priceObservations : []).filter((o) => o.price > 0).length >= 2
+  const poolPriceTrusted = corroborated || !brokenPool
+  if (
+    poolPriceTrusted &&
+    profile.priceUsd > 0 &&
+    g.price > 0 &&
+    (g.price < profile.priceUsd / 3 || g.price > profile.priceUsd * 3)
+  ) {
     return profile
   }
 
@@ -479,8 +493,14 @@ async function recallCmcInfo(symbol) {
 
   let items = null
   try {
-    const raw = (await cmcInfo(sym))?.data?.[sym]
-    items = Array.isArray(raw) ? raw : raw ? [raw] : null
+    // The keyed info endpoint keys its payload by numeric coin id, not symbol,
+    // so data[sym] is usually undefined — match on the symbol field instead and
+    // still honour a symbol-keyed payload for tiers that return one.
+    const data = (await cmcInfo(sym))?.data
+    const raw = data ? data[sym] : null
+    const pool = Array.isArray(data) ? data : data && typeof data === 'object' ? Object.values(data) : []
+    const matched = pool.filter((v) => cleanSymbol(v?.symbol) === sym)
+    items = (Array.isArray(raw) ? raw : raw ? [raw] : null) || (matched.length ? matched : null)
   } catch (err) {
     console.warn('[tokenResolver] cmc metadata skipped:', err.message)
   }
@@ -500,9 +520,13 @@ async function applyCmcInfo(profile) {
   const items = await recallCmcInfo(profile.symbol)
   if (!items) return profile
   const ca = String(profile.ca || '').toLowerCase()
+  // CA match first (provably same asset). If our contract isn't in the listing's
+  // platform field, only borrow the copy when CMC returned a SINGLE unambiguous
+  // listing for the ticker — multiple same-ticker listings still require the CA
+  // match, so a lookalike can never steal another project's description.
   const info =
     items.find((i) => ca && String(i?.platform?.token_address || '').toLowerCase() === ca) ||
-    (ca ? null : items[0])
+    (ca ? (items.length === 1 ? items[0] : null) : items[0])
   if (!info) return profile
 
   const first = (list) => (Array.isArray(list) && list.length ? list[0] : null)
