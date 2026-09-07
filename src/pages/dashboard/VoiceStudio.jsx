@@ -12,7 +12,7 @@ import { PageHeader, EmptyState, friendlyError } from '../../components/DashUI'
 import GenLoader from '../../components/loaders/GenLoader'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import { downloadDataUrl } from './StudioShared'
-import { recallStudio, rememberStudio } from '../../lib/studioCache'
+import { recallStudio, recallStudioAsync, rememberStudio } from '../../lib/studioCache'
 
 export default function VoiceStudio() {
   const [searchParams] = useSearchParams()
@@ -28,6 +28,18 @@ function VoiceStudioInner({ token }) {
   // no re-synthesis, no lost work, until the user picks a different token.
   const [output, setOutput] = useState(() => recallStudio('voice', token))
   const [phase, setPhase] = useState(() => (recallStudio('voice', token) ? 'done' : 'idle')) // idle | generating | done
+
+  // A hard refresh restores the previous narration from disk — no re-speak,
+  // no second bill for the same audio.
+  useEffect(() => {
+    let alive = true
+    recallStudioAsync('voice', token).then((entry) => {
+      if (!alive || !entry) return
+      setOutput((cur) => cur || entry)
+      setPhase((p) => (p === 'idle' ? 'done' : p))
+    })
+    return () => { alive = false }
+  }, [token])
   const [error, setError] = useState(null)
   const [speaking, setSpeaking] = useState(false)
   const audioRef = useRef(null)

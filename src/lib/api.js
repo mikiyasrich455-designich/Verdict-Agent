@@ -60,19 +60,83 @@ export const ANALYSIS_STEPS = [
   'Building the verdict…',
 ]
 
-// ── Speed layer: client cache + in-flight dedupe ────────────────────────────
+// ── Speed layer: client cache + in-flight dedupe + disk mirror ─────────────
 // Re-visiting a dashboard renders instantly instead of re-running the whole
 // agent chain, and two pages asking for the same feed share ONE network call.
 // TTLs stay under the server's own cache windows so this never shows staler
 // data than the backend would have. body === null → GET.
+// The cache is also mirrored to localStorage, so a hard refresh keeps every
+// analysis the visitor already ran: pages open straight onto the previous
+// work (stale-while-revalidate) while a fresh pass runs quietly behind it.
+const CACHE_DISK_KEY = 'verdict.cache.v1'
+const CACHE_DISK_MAX_AGE = 6 * 60 * 60 * 1000 // 6h — beyond that a refresh starts fresh
 const cacheStore = new Map()
 const inflight = new Map()
+const revalidating = new Set()
 
-function request(path, body, { ttl = 90000, label = 'Request', cacheIf } = {}) {
+function loadDiskCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_DISK_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    const now = Date.now()
+    for (const [key, entry] of Object.entries(parsed || {})) {
+      if (entry?.at && now - entry.at < CACHE_DISK_MAX_AGE) cacheStore.set(key, entry)
+    }
+  } catch {
+    // storage unavailable or corrupted — start clean, never break the app
+  }
+}
+
+let diskTimer = null
+function persistDiskCache() {
+  if (diskTimer) clearTimeout(diskTimer)
+  diskTimer = setTimeout(() => {
+    diskTimer = null
+    try {
+      const out = {}
+      for (const [key, entry] of cacheStore.entries()) out[key] = entry
+      localStorage.setItem(CACHE_DISK_KEY, JSON.stringify(out))
+    } catch {
+      // quota exceeded — drop the mirror, the in-memory cache still works
+      try { localStorage.removeItem(CACHE_DISK_KEY) } catch { /* nothing else to do */ }
+    }
+  }, 400)
+}
+
+if (typeof window !== 'undefined') loadDiskCache()
+
+function request(path, body, { ttl = 90000, label = 'Request', cacheIf, swr = false } = {}) {
   const isGet = body === null
   const key = isGet ? path : `${path}::${JSON.stringify(body || {})}`
   const hit = cacheStore.get(key)
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value)
+
+  // Stale-while-revalidate: hand back the previous pass immediately and
+  // refresh it in the background so the next open is current again.
+  if (hit && swr) {
+    if (!revalidating.has(key) && !inflight.has(key)) {
+      revalidating.add(key)
+      ;(async () => {
+        const res = await fetch(path, isGet
+          ? undefined
+          : {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              ...(body ? { body: JSON.stringify(body) } : {}),
+            })
+        if (!res.ok) return
+        const value = await res.json()
+        if (!cacheIf || cacheIf(value)) {
+          cacheStore.set(key, { at: Date.now(), value })
+          persistDiskCache()
+        }
+      })().catch(() => { /* background refresh failed — the stale read stays */ })
+        .finally(() => revalidating.delete(key))
+    }
+    return Promise.resolve(hit.value)
+  }
+
   if (inflight.has(key)) return inflight.get(key)
 
   const p = (async () => {
@@ -88,7 +152,10 @@ function request(path, body, { ttl = 90000, label = 'Request', cacheIf } = {}) {
       throw new Error(err.error || `${label} failed`)
     }
     const value = await res.json()
-    if (!cacheIf || cacheIf(value)) cacheStore.set(key, { at: Date.now(), value })
+    if (!cacheIf || cacheIf(value)) {
+      cacheStore.set(key, { at: Date.now(), value })
+      persistDiskCache()
+    }
     return value
   })().finally(() => inflight.delete(key))
 
@@ -104,6 +171,7 @@ export function fetchVerdict(symbol) {
     ttl: 240000,
     label: 'Verdict',
     cacheIf: (v) => !v?.degraded,
+    swr: true,
   })
 }
 
@@ -114,7 +182,7 @@ export function fetchDebate(symbol) {
 
 // POST /api/proxy/synthesis/council → evidence-grounded Bull vs Bear vs Judge
 export function fetchCouncil(symbol) {
-  return request('/api/proxy/synthesis/council', withIdentity({ symbol }), { ttl: 240000, label: 'Council' })
+  return request('/api/proxy/synthesis/council', withIdentity({ symbol }), { ttl: 240000, label: 'Council', swr: true })
 }
 
 // POST /api/proxy/ryo/market_overview → normalized overview shape
@@ -136,7 +204,7 @@ export function fetchScan() {
 // `identity` ({ca, chain, name}) pins the lookup to one contract when the page
 // already knows it — otherwise the stored active token is used.
 export async function fetchTokenProfile(symbol, identity) {
-  const data = await request('/api/proxy/ryo/analyze_token', withIdentity({ symbol }, identity), { ttl: 60000, label: 'Token profile' })
+  const data = await request('/api/proxy/ryo/analyze_token', withIdentity({ symbol }, identity), { ttl: 60000, label: 'Token profile', swr: true })
   return enrichProfile(data)
 }
 
@@ -152,17 +220,17 @@ export function fetchSentimentShift() {
 
 // POST /api/proxy/synthesis/narrative → normalized narrative shape
 export function fetchNarrative(symbol) {
-  return request('/api/proxy/synthesis/narrative', withIdentity({ symbol }), { ttl: 120000, label: 'Narrative' })
+  return request('/api/proxy/synthesis/narrative', withIdentity({ symbol }), { ttl: 120000, label: 'Narrative', swr: true })
 }
 
 // POST /api/proxy/synthesis/risk → normalized risk desk shape
 export function fetchRiskDesk(symbol, limits) {
-  return request('/api/proxy/synthesis/risk', withIdentity({ symbol, limits }), { ttl: 45000, label: 'Risk desk' })
+  return request('/api/proxy/synthesis/risk', withIdentity({ symbol, limits }), { ttl: 45000, label: 'Risk desk', swr: true })
 }
 
 // POST /api/proxy/synthesis/script → normalized studio script shape
 export function fetchStudioScript(symbol) {
-  return request('/api/proxy/synthesis/script', withIdentity({ symbol }), { ttl: 240000, label: 'Studio script' })
+  return request('/api/proxy/synthesis/script', withIdentity({ symbol }), { ttl: 240000, label: 'Studio script', swr: true })
 }
 
 // POST /api/proxy/synthesis/final → master desk pass over every other agent's output.
@@ -175,6 +243,7 @@ export function fetchFinal(symbol, agents) {
     ttl: 600000,
     label: 'Final recommendation',
     cacheIf: (v) => !v?.degraded,
+    swr: true,
   })
 }
 

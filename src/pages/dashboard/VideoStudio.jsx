@@ -1,5 +1,5 @@
 // Studio · Video — a 25s cinematic news package from two shots (15s + 10s) played back-to-back
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Video, RefreshCw, Play, Pause, Download, Sparkles, Clock } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -10,7 +10,7 @@ import { PageHeader, EmptyState, ErrorState, friendlyError } from '../../compone
 import GenLoader from '../../components/loaders/GenLoader'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, coverFor } from './StudioShared'
-import { recallStudio, rememberStudio } from '../../lib/studioCache'
+import { recallStudio, recallStudioAsync, rememberStudio } from '../../lib/studioCache'
 
 export default function VideoStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -26,6 +26,18 @@ function VideoStudioInner({ token, pick }) {
   // no re-render, no lost work, until the user picks a different token.
   const [output, setOutput] = useState(() => recallStudio('video', token))
   const [phase, setPhase] = useState(() => (recallStudio('video', token) ? 'done' : 'idle')) // idle | generating | done
+
+  // A hard refresh restores the previous clip from disk — no re-render, no
+  // second bill for the same package.
+  useEffect(() => {
+    let alive = true
+    recallStudioAsync('video', token).then((entry) => {
+      if (!alive || !entry) return
+      setOutput((cur) => cur || entry)
+      setPhase((p) => (p === 'idle' ? 'done' : p))
+    })
+    return () => { alive = false }
+  }, [token])
   const [error, setError] = useState(null)
   const [clipIndex, setClipIndex] = useState(0)
   const [playing, setPlaying] = useState(false)

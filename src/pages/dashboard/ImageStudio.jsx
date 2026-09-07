@@ -1,5 +1,5 @@
 // Studio · Image — generates art via Qwen image model
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ImageIcon, RefreshCw, Download, Sparkles, Maximize2, Type } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -10,7 +10,7 @@ import { PageHeader, EmptyState, ErrorState, friendlyError } from '../../compone
 import GenLoader from '../../components/loaders/GenLoader'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, coverFor } from './StudioShared'
-import { recallStudio, rememberStudio } from '../../lib/studioCache'
+import { recallStudio, recallStudioAsync, rememberStudio } from '../../lib/studioCache'
 
 export default function ImageStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -26,6 +26,18 @@ function ImageStudioInner({ token, pick }) {
   // no re-render, no lost work, until the user picks a different token.
   const [output, setOutput] = useState(() => recallStudio('image', token))
   const [phase, setPhase] = useState(() => (recallStudio('image', token) ? 'done' : 'idle')) // idle | generating | done
+
+  // A hard refresh restores the previous card from disk — no re-render, no
+  // second bill for the same image.
+  useEffect(() => {
+    let alive = true
+    recallStudioAsync('image', token).then((entry) => {
+      if (!alive || !entry) return
+      setOutput((cur) => cur || entry)
+      setPhase((p) => (p === 'idle' ? 'done' : p))
+    })
+    return () => { alive = false }
+  }, [token])
   const [error, setError] = useState(null)
 
   const header = (
