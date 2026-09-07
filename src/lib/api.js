@@ -67,7 +67,7 @@ export const ANALYSIS_STEPS = [
 const cacheStore = new Map()
 const inflight = new Map()
 
-function request(path, body, { ttl = 90000, label = 'Request' } = {}) {
+function request(path, body, { ttl = 90000, label = 'Request', cacheIf } = {}) {
   const isGet = body === null
   const key = isGet ? path : `${path}::${JSON.stringify(body || {})}`
   const hit = cacheStore.get(key)
@@ -97,7 +97,13 @@ function request(path, body, { ttl = 90000, label = 'Request' } = {}) {
 
 // POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + live data)
 export function fetchVerdict(symbol) {
-  return request('/api/proxy/synthesis/verdict', withIdentity({ symbol }), { ttl: 240000, label: 'Verdict' })
+  // A degraded (data-only) verdict is never cached: the next visit retries the
+  // full reasoning pass instead of pinning the weak answer to the screen.
+  return request('/api/proxy/synthesis/verdict', withIdentity({ symbol }), {
+    ttl: 240000,
+    label: 'Verdict',
+    cacheIf: (v) => !v?.degraded,
+  })
 }
 
 // POST /api/proxy/synthesis/debate → analyze → debate shape

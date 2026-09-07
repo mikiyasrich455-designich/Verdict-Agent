@@ -61,7 +61,7 @@ async function gatherDeepData(symbolUpper) {
       ]
       const allResults = []
       const results = await Promise.allSettled(
-        queries.map(q => callSearch(q, 5, 13000).catch(e => {
+        queries.map(q => callSearch(q, 5, 20000).catch(e => {
           console.log('[DEEP] SERP failed for query:', q, e.message)
           return null
         }))
@@ -100,7 +100,7 @@ async function deepAnalyze(symbol, live = null) {
   console.log(`[DEEP] ${symbolUpper}: Starting parallel data fetch (RYO + 3x SERP)...`)
   const { ryoData, serpData } = await withBudget(
     gatherDeepData(symbolUpper),
-    17000,
+    26000,
     { ryoData: {}, serpData: [] },
   )
 
@@ -210,7 +210,7 @@ IMPORTANT RULES:
       const retry = await callLLM([
         { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
         { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
-      ], QWEN_MODELS.chat, 1600, { timeoutMs: 18000, json: true, temperature: 0.2 })
+      ], QWEN_MODELS.chat, 1600, { timeoutMs: 30000, json: true, temperature: 0.2 })
       analysis = extractJson(retry)
     } catch (e) {
       console.log('[DEEP] retry pass failed:', e.message)
@@ -250,6 +250,7 @@ IMPORTANT RULES:
     },
     keyLevels: analysis.keyLevels || analysis.key_levels || analysis.levels || {},
     finalThesis: analysis.finalThesis || analysis.final_thesis || analysis.thesis || analysis.conclusion || '',
+    degraded,
     asOf: new Date().toISOString(),
     timing: {
       dataFetchMs: dataFetchTime,
@@ -465,7 +466,7 @@ router.post('/verdict', async (req, res) => {
     console.log('[VERDICT] Running deep forensic analysis...')
     // Hard outer ceiling: even if a stage hangs past its own budget the caller
     // gets a clean message, never a raw "operation was aborted".
-    const data = await withBudget(deepAnalyze(symbol, req.tokenIdentity), 75000, null)
+    const data = await withBudget(deepAnalyze(symbol, req.tokenIdentity), 115000, null)
     if (!data) {
       log('POST', '/synthesis/verdict', 504, Date.now() - start)
       return res.status(504).json({
@@ -473,8 +474,10 @@ router.post('/verdict', async (req, res) => {
       })
     }
 
-    console.log(`[VERDICT] Analysis complete: ${data.verdict} ${data.confidence}% (${data.timing?.totalMs}ms)`)
-    setCache(cacheKey, data, 30 * 60 * 1000)
+    console.log(`[VERDICT] Analysis complete: ${data.verdict} ${data.confidence}% (${data.timing?.totalMs}ms${data.degraded ? ', degraded' : ''})`)
+    // A degraded (data-only) verdict is a one-shot answer, never a cache entry —
+    // the next request must get another chance at the full reasoning pass.
+    if (!data.degraded) setCache(cacheKey, data, 30 * 60 * 1000)
     log('POST', '/synthesis/verdict', 200, Date.now() - start)
     // Include timing in response for frontend progress
     res.json({ ...data, elapsedMs: Date.now() - start })
