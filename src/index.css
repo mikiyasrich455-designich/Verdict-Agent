@@ -2339,3 +2339,48 @@ h1, h2, h3, h4 {
   50% { transform: scaleY(var(--peak, 0.9)); opacity: 1; }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   KOL RADAR — one clean card per real post: identity row, title,
+   quote block, conviction meter, source link. Nothing squeezed.
+   ══════════════════════════════════════════════════════════════════ */
+
+.kol-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 156, 255, 0.14);
+  background: rgba(255, 255, 255, 0.028);
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.kol-card:hover { border-color: rgba(126, 156, 255, 0.32); background: rgba(255, 255, 255, 0.042); }
+
+.kol-head { display: flex; align-items: center; gap: 11px; }
+.kol-avatar {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center; border: 1px solid;
+}
+.kol-handle {
+  font-size: 13px; font-weight: 600; color: #f4f8ff; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kol-meta {
+  display: block; margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kol-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
+
+.kol-title { font-size: 12px; font-weight: 600; color: #dce5f8; line-height: 1.55; }
+
+.kol-quote {
+  font-size: 12px; line-height: 1.7; color: #aebfe4;
+  border-left: 2px solid rgba(126, 156, 255, 0.35);
+  padding-left: 12px;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.kol-meter-head { display: flex; align-items: center; justify-content: space-between; }
+.kol-meter-bar { margin-top: 6px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.kol-meter-fill { height: 100%; border-radius: 999px; }
+
+.kol-card .cv-source { margin-bottom: 0; }
+

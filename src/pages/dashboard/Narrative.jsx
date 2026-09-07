@@ -59,7 +59,7 @@ function TonePill({ label, tone }) {
   const color = TONES[tone] || TONES.blue
   return (
     <span
-      className="rounded-full px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em]"
+      className="whitespace-nowrap rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em]"
       style={{ color, background: `${color}14`, border: `1px solid ${color}55`, boxShadow: `0 0 18px ${color}33` }}
     >
       {label}
@@ -98,33 +98,28 @@ function KolCard({ k, delay }) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.38, delay, ease: 'easeOut' }}
-      className="flex flex-col rounded-2xl border p-4"
-      style={{ borderColor: 'rgba(126,156,255,0.14)', background: 'rgba(255,255,255,0.03)' }}
+      className="kol-card"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full border"
-            style={{ color, borderColor: `${color}55`, background: `${color}14` }}
-            title={platform}
-          >
-            <PlatformLogo platform={platform} />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-[12.5px] font-semibold leading-none" style={{ color: '#f4f8ff' }}>
-              {k.handle}
-            </p>
-            <MicroLabel className="mt-1.5 block">
-              {platform}
-              {k.posted ? ` · ${k.posted}` : ''}
-              {k.source && k.source !== k.handle ? ` · ${k.source}` : k.host && k.host !== platform ? ` · ${k.host}` : ''}
-            </MicroLabel>
-          </div>
+      <div className="kol-head">
+        <span
+          className="kol-avatar"
+          style={{ color, borderColor: `${color}55`, background: `${color}14` }}
+          title={platform}
+        >
+          <PlatformLogo platform={platform} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="kol-handle">{k.handle}</p>
+          <MicroLabel className="kol-meta">
+            {platform}
+            {k.posted ? ` · ${k.posted}` : ''}
+            {k.source && k.source !== k.handle ? ` · ${k.source}` : k.host && k.host !== platform ? ` · ${k.host}` : ''}
+          </MicroLabel>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5">
+        <div className="kol-badges">
           {k.impact && (
             <span
-              className="cv-chip !rounded-md !px-1.5 !py-0.5 font-mono !text-[9px]"
+              className="cv-chip !rounded-md !px-2 !py-1 font-mono !text-[9px] !whitespace-nowrap"
               style={k.impact === 'HIGH' ? { color: TONES.amber, borderColor: `${TONES.amber}55`, background: `${TONES.amber}14` } : undefined}
             >
               {k.impact}
@@ -135,26 +130,24 @@ function KolCard({ k, delay }) {
       </div>
 
       {k.title && (
-        <p className="mt-2.5 line-clamp-2 text-[11.5px] leading-snug" style={{ color: '#c3cde8' }}>
+        <p className="kol-title">
           {k.title}{k.duration ? ` · ${k.duration}` : ''}
         </p>
       )}
 
-      <InsightRow icon={Quote} tone={tone} title="The post" body={`“${k.quote}”`} />
+      {k.quote && <blockquote className="kol-quote">{`“${k.quote}”`}</blockquote>}
 
-      <div className="mt-2">
-        <div className="flex items-center justify-between">
+      <div>
+        <div className="kol-meter-head">
           <MicroLabel>Conviction</MicroLabel>
-          <span className="font-mono text-[10px]" style={{ color }}>{conviction}</span>
+          <span className="font-mono text-[10px] font-semibold" style={{ color }}>{conviction}</span>
         </div>
-        <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
-          <div className="h-full rounded-full" style={{ width: `${conviction}%`, background: color }} />
+        <div className="kol-meter-bar">
+          <div className="kol-meter-fill" style={{ width: `${conviction}%`, background: color }} />
         </div>
       </div>
 
-      <div className="mt-2.5">
-        <SourceRow title={`View ${k.handle}'s post`} url={k.url} tag={platform} />
-      </div>
+      <SourceRow title={`View ${k.handle}'s post`} url={k.url} tag={platform} />
     </motion.div>
   )
 }
@@ -288,7 +281,7 @@ export default function Narrative() {
             right={<MicroLabel>{d.kols.length} posts</MicroLabel>}
             delay={0.16}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-3">
               {d.kols.length === 0 && (
                 <p className="col-span-full px-4 py-4 text-center text-[12px] leading-relaxed" style={{ color: '#66739a' }}>
                   {d.sentiment_summary_text || `No recent KOL posts found for ${d.symbol} — nothing is invented when the sweep comes back empty. Try re-sweeping.`}
