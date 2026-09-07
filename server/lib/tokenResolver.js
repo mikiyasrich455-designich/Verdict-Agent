@@ -94,6 +94,108 @@ function prettyDex(dexId) {
   return DEX_PRETTY[d] || d.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// ── Cross-source market sanity ─────────────────────────────────────────────
+// Every enrichment step records the numbers it actually saw. hydrate() then
+// clusters the quotes (largest agreeing cluster wins, ties break on source
+// trust), checks the winner against the token's own traded candles, and
+// refuses to print impossible 24h moves. One broken pool can never again
+// surface as a $928 blue-chip or a +375,809% day.
+const SOURCE_TRUST = { cmc: 5, coingecko: 4, dexscreener: 3, 'gt-token': 2, 'gt-pool': 2, geckoterminal: 2, pumpfun: 1 }
+
+const fin = (v) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+const medianOf = (xs) => {
+  const s = [...xs].sort((a, b) => a - b)
+  const m = s.length >> 1
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
+function observe(profile, source, priceUsd, change24h) {
+  const price = fin(priceUsd)
+  const change = fin(change24h)
+  if ((price === null || price <= 0) && change === null) return
+  const obs = profile.priceObservations || (profile.priceObservations = [])
+  if (obs.length < 12) obs.push({ source, price: price !== null && price > 0 ? price : null, change })
+}
+
+// Real traded candles are ground truth: the % move over the last ~24h of tape.
+function candleChange24h(profile) {
+  const hist = Array.isArray(profile.priceHistory) ? profile.priceHistory : []
+  if (hist.length < 3) return null
+  const last = hist[hist.length - 1]
+  if (!last?.price || last.price <= 0 || !last.t) return null
+  const target = last.t - 24 * 3600 * 1000
+  let base = null
+  for (const c of hist) {
+    if (!c?.price || c.price <= 0 || !c.t) continue
+    if (!base || Math.abs(c.t - target) < Math.abs(base.t - target)) base = c
+  }
+  if (!base || base.t === last.t) return null
+  const spanH = (last.t - base.t) / 3600000
+  if (spanH < 12 || spanH > 48) return null
+  return ((last.price - base.price) / base.price) * 100
+}
+
+function clusterConsensus(obs, field, tolerance) {
+  const pts = obs.map((o) => ({ v: o[field], source: o.source })).filter((p) => p.v !== null && Number.isFinite(p.v))
+  if (!pts.length) return null
+  const sorted = [...pts].sort((a, b) => a.v - b.v)
+  let best = null
+  for (const anchor of sorted) {
+    const cluster = sorted.filter((p) => tolerance(p.v, anchor.v))
+    const trust = cluster.reduce((s, p) => s + (SOURCE_TRUST[p.source] || 0), 0)
+    if (!best || cluster.length > best.cluster.length || (cluster.length === best.cluster.length && trust > best.trust)) {
+      best = { cluster, trust }
+    }
+  }
+  return medianOf(best.cluster.map((p) => p.v))
+}
+
+function consensusMarket(profile) {
+  const obs = Array.isArray(profile.priceObservations) ? profile.priceObservations : []
+  const tape = candleChange24h(profile)
+  const hist = Array.isArray(profile.priceHistory) ? profile.priceHistory : []
+  const lastCandle = hist.length && hist[hist.length - 1].price > 0 ? hist[hist.length - 1].price : 0
+
+  // Price: largest cluster of agreeing quotes (within 2.5x) wins.
+  const priceConsensus = clusterConsensus(obs, 'price', (v, a) => v >= a / 2.5 && v <= a * 2.5)
+  if (priceConsensus !== null && obs.filter((o) => o.price > 0).length >= 2) {
+    if (!profile.priceUsd || profile.priceUsd < priceConsensus / 2.5 || profile.priceUsd > priceConsensus * 2.5) {
+      profile.priceUsd = priceConsensus
+      profile.priceCorrected = true
+    }
+  }
+  // Traded candles beat any quote that disagrees with its own tape by >3x.
+  if (lastCandle > 0 && profile.priceUsd > 0 && (profile.priceUsd < lastCandle / 3 || profile.priceUsd > lastCandle * 3)) {
+    profile.priceUsd = lastCandle
+    profile.priceCorrected = true
+  }
+
+  // 24h change: agreeing cluster (within ±30pp or ±60%) wins, then the tape vetoes.
+  const changeConsensus = clusterConsensus(obs, 'change', (v, a) => Math.abs(v - a) <= Math.max(30, Math.abs(a) * 0.6))
+  if (changeConsensus !== null && obs.filter((o) => o.change !== null).length >= 2) {
+    if (!Number.isFinite(profile.change24h) || Math.abs(profile.change24h - changeConsensus) > Math.max(60, Math.abs(changeConsensus) * 3)) {
+      profile.change24h = Math.round(changeConsensus * 100) / 100
+      profile.changeCorrected = true
+    }
+  }
+  if (tape !== null && Number.isFinite(profile.change24h) && Math.abs(profile.change24h - tape) > Math.max(60, Math.abs(tape) * 4)) {
+    profile.change24h = Math.round(tape * 100) / 100
+    profile.changeCorrected = true
+  }
+  // A 24h move beyond ±9,999% is not a market number — fall back to the tape.
+  if (Number.isFinite(profile.change24h) && Math.abs(profile.change24h) > 9999) {
+    profile.change24h = tape !== null ? Math.round(tape * 100) / 100 : null
+    profile.changeCorrected = true
+  }
+  if (Number.isFinite(profile.change6h) && Math.abs(profile.change6h) > 9999) profile.change6h = null
+  if (Number.isFinite(profile.change1h) && Math.abs(profile.change1h) > 9999) profile.change1h = null
+  return profile
+}
+
 /**
  * Links arrive as bare strings from one indexer and {url, app_name} objects from
  * another. The UI renders them as labelled chips, so settle on a single shape here
@@ -167,6 +269,7 @@ function identityFromPair(pair) {
     websites: normSites(info.websites),
     description: null,
     categories: [],
+    priceObservations: [{ source: 'dexscreener', price: num(pair.priceUsd) || null, change: fin(pair.priceChange?.h24) }],
   }
 }
 
@@ -209,6 +312,7 @@ async function applyGeckoTerminal(profile) {
     profile.tokenVolume24h = num(attrs.volume_usd?.h24) || profile.volume24h
     profile.totalReserveUsd = num(attrs.total_reserve_in_usd) || null
     profile.cgCoinId = attrs.coingecko_coin_id || null
+    observe(profile, 'gt-token', attrs.price_usd, null)
     if (num(attrs.price_usd)) profile.priceUsd = num(attrs.price_usd)
     // A pool search names pairs, not projects ("ACE / SOL") — the token record wins.
     if (attrs.name && (!profile.name || profile.name.includes('/') || profile.name === profile.symbol)) {
@@ -248,6 +352,7 @@ async function applyGeckoTerminal(profile) {
     profile.uniqueBuyers24h = num(a.transactions?.h24?.buyers) || null
     profile.uniqueSellers24h = num(a.transactions?.h24?.sellers) || null
     profile.volume24h = num(a.volume_usd?.h24) || profile.volume24h
+    observe(profile, 'gt-pool', null, a.price_change_percentage?.h24)
   }
 
   profile.marketCap = profile.gtMarketCap || profile.marketCap
@@ -328,6 +433,7 @@ async function geckoFallback(ca) {
     websites: [],
     description: null,
     categories: [],
+    priceObservations: [{ source: 'geckoterminal', price: num(a.base_token_price_usd ?? a.token_price_usd) || null, change: fin(a.price_change_percentage?.h24) }],
     resolved: true,
     matchType: 'contract_geckoterminal',
   }
@@ -395,6 +501,7 @@ async function gtTokenProfile(ca, preferredChain) {
       whitepaper: sites.find((s) => /whitepaper|\.pdf/i.test(s.url))?.url || null,
       socials,
       categories: [],
+      priceObservations: [{ source: 'geckoterminal', price: num(a.price_usd) || null, change: fin(pa.price_change_percentage?.h24) }],
       resolved: true,
       matchType: 'contract_geckoterminal',
     }
@@ -470,6 +577,7 @@ async function pumpFunProfile(ca) {
     socials,
     categories: [],
     ath: num(coin.ath_market_cap) || undefined,
+    priceObservations: supply && marketCap ? [{ source: 'pumpfun', price: marketCap / supply, change: null }] : [],
     resolved: true,
     matchType: 'contract_pumpfun',
   }
@@ -501,6 +609,7 @@ async function applyCoinGecko(profile) {
 
   const md = coin.market_data || {}
   const links = coin.links || {}
+  observe(profile, 'coingecko', md.current_price?.usd, md.price_change_percentage_24h)
 
   profile.name = coin.name || profile.name
   profile.symbol = cleanSymbol(coin.symbol) || profile.symbol
@@ -643,6 +752,10 @@ async function hydrate(profile, candidates) {
     rememberSticky(profile)
   }
 
+  // Cross-source sanity gate: one broken pool must never print a fake price
+  // or an impossible 24h move on any agent page.
+  consensusMarket(profile)
+
   if (PAIR_LIKE_NAME.test(String(profile.name || ''))) {
     profile.name = String(profile.name).split('/')[0].trim()
   }
@@ -672,7 +785,7 @@ async function majorCoinProfile(symbol) {
   const cap = num(usd.market_cap)
   const fdv = num(usd.fully_diluted_market_cap)
 
-  return {
+  return consensusMarket({
     symbol: cleanSymbol(item.symbol) || upper,
     name: item.name || upper,
     chain: null,
@@ -681,6 +794,7 @@ async function majorCoinProfile(symbol) {
     isCA: false,
     priceUsd: num(usd.price),
     change24h: num(usd.percent_change_24h),
+    priceObservations: [{ source: 'cmc', price: num(usd.price) || null, change: fin(usd.percent_change_24h) }],
     change7d: num(usd.percent_change_7d),
     marketCap: cap,
     fdv,
@@ -709,7 +823,7 @@ async function majorCoinProfile(symbol) {
     chartSource: null,
     resolved: true,
     matchType: 'cmc_major',
-  }
+  })
 }
 
 /**

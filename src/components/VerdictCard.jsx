@@ -33,6 +33,9 @@ const ShareCard = forwardRef(function ShareCard({ data }, ref) {
     score,
   }))
   const changePositive = data.change24h >= 0
+  const changeTxt = Number.isFinite(Number(data.change24h)) && Math.abs(Number(data.change24h)) <= 9999
+    ? `${changePositive ? '+' : '-'}${Math.abs(Number(data.change24h)).toFixed(2)}%`
+    : '—'
 
   return (
     <div
@@ -68,7 +71,7 @@ const ShareCard = forwardRef(function ShareCard({ data }, ref) {
                 borderRadius: 6,
               }}
             >
-              {changePositive ? '+' : '-'}{Math.abs(data.change24h).toFixed(2)}%
+              {changeTxt}
             </span>
           </div>
         </div>
@@ -155,6 +158,9 @@ export default function VerdictCard({ data }) {
     score,
   }))
   const changePositive = data.change24h >= 0
+  const changeTxt = Number.isFinite(Number(data.change24h)) && Math.abs(Number(data.change24h)) <= 9999
+    ? `${changePositive ? '+' : '-'}${Math.abs(Number(data.change24h)).toFixed(2)}%`
+    : '—'
 
   return (
     <div className="card-aurora p-6 md:p-8 w-full">
@@ -171,7 +177,7 @@ export default function VerdictCard({ data }) {
                 changePositive ? 'text-success bg-success/10 border border-success/20' : 'text-danger bg-danger/10 border border-danger/20'
               }`}
             >
-              {changePositive ? '+' : '-'}{Math.abs(data.change24h).toFixed(2)}%
+              {changeTxt}
             </span>
           </div>
         </div>

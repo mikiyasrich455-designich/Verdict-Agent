@@ -22,12 +22,12 @@ export const fmtUsd = (v) => {
 }
 
 // Memecoins price in the 7th decimal — fixed 2dp would render "$0.00".
+// Whole-dollar assets always show exactly 2dp ("$928.97", never "$928.9700").
 export const fmtPrice = (v) => {
   const n = Number(v)
   if (!Number.isFinite(n) || n === 0) return '—'
   const abs = Math.abs(n)
-  if (abs >= 1000) return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
-  if (abs >= 1) return `$${n.toFixed(4)}`
+  if (abs >= 1) return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   if (abs >= 0.01) return `$${n.toFixed(5)}`
   const digits = Math.min(12, Math.max(4, Math.ceil(-Math.log10(abs)) + 3))
   return `$${n.toFixed(digits)}`
@@ -39,7 +39,13 @@ export const fmtNum = (v) => {
   return n.toLocaleString('en-US')
 }
 
-export const fmtPct = (v) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`)
+// A 24h print beyond ±9,999% is a broken upstream quote, not a market move —
+// the server gate already drops these; this keeps stale client caches honest.
+export const fmtPct = (v) => {
+  const n = Number(v)
+  if (v === null || v === undefined || Number.isNaN(n) || Math.abs(n) > 9999) return '—'
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+}
 export const changeColor = (v) => (Number(v) >= 0 ? 'text-up' : 'text-down')
 
 // Source health badge — the honesty layer judges look for.

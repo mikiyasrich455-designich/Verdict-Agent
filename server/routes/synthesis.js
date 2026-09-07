@@ -132,6 +132,10 @@ async function deepAnalyze(symbol, live = null) {
   const change24h = Number.isFinite(liveChange) ? liveChange : (perf.change_24h_pct || 0)
   const marketCapUsd = liveCap > 0 ? liveCap : (market.market_cap_usd || 0)
   const volume24hUsd = liveVol > 0 ? liveVol : (market.volume_24h_usd || 0)
+  // The research desk's own tape, shown to the model as an independent second
+  // quote so a >3x divergence is reasoned about as a data-quality risk.
+  const ryoPrice = Number(market.price_usd) || 0
+  const ryoChange = Number.isFinite(Number(perf.change_24h_pct)) ? Number(perf.change_24h_pct) : null
 
   const serpText = serpData?.map(r => {
     const title = r.title || r.snippet || ''
@@ -146,8 +150,8 @@ SYMBOL: ${symbolUpper}
 NAME: ${asset.name || symbolUpper}
 ${live?.ca ? `EXACT TOKEN IDENTITY: contract ${live.ca} on ${live.chainLabel || live.chain || 'resolved chain'}. Analyze ONLY this exact token — never substitute another coin, ticker or chain.` : 'IDENTITY: resolve strictly by the SYMBOL above — never substitute another coin, ticker or chain.'}
 CURRENT PRICE: $${priceUsd.toLocaleString()}
-24H CHANGE: ${change24h}%
-7D CHANGE: ${perf.change_7d_pct || 0}%
+24H CHANGE: ${Number.isFinite(change24h) ? change24h : 'n/a'}%
+${ryoPrice > 0 ? `RESEARCH-DESK CROSS QUOTE: $${ryoPrice.toLocaleString()} (${ryoChange !== null ? `${ryoChange}%` : 'n/a'} 24h) — an independent desk tape for the same symbol. If it diverges from the contract-bound quote above by more than 3x, trust the contract-bound quote and flag the divergence as a data-quality risk in bearReasons.\n` : ''}7D CHANGE: ${perf.change_7d_pct || 0}%
 30D MOMENTUM: ${perf.momentum_30d_pct || 0}%
 MARKET CAP: $${(marketCapUsd / 1e6).toFixed(1)}M
 24H VOLUME: $${(volume24hUsd / 1e6).toFixed(1)}M
