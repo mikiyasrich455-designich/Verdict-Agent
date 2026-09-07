@@ -1,0 +1,22 @@
+# Render blueprint — one-click deploy for the submission repo.
+# Values are NEVER stored here: set each variable in the Render dashboard
+# (or an env group) exactly as configured on the existing service.
+services:
+  - type: web
+    name: verdict-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build && npm --prefix server install
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: RYO_MCP_BASE
+        sync: false
+      - key: RYO_MCP_KEY
+        sync: false
+      - key: QWEN_KEY
+        sync: false
+      - key: CMC_API_KEY
+        sync: false
+      - key: ACEDATA_KEY
+        sync: false
