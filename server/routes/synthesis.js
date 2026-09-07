@@ -401,6 +401,14 @@ function moneyShort(v) {
   return `$${n.toFixed(2)}`
 }
 
+function numShort(v) {
+  const n = Number(v) || 0
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+  return `${n.toFixed(0)}`
+}
+
 const cleanName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 function serpList(r) {
@@ -585,6 +593,16 @@ async function buildEvidencePack(symbol, live) {
     lines.push(`- 24h tape: ${live.buys24h || 0} buys / ${live.sells24h || 0} sells (${live.uniqueBuyers24h || 0} buyers / ${live.uniqueSellers24h || 0} wallets)`)
     lines.push(`- Pool age: ${Number(live.pairAgeDays || 0).toFixed(0)} days`)
     if (Number.isFinite(Number(live.athChangePct))) lines.push(`- Distance from ATH: ${Number(live.athChangePct).toFixed(1)}%`)
+    if (Number.isFinite(Number(live.cgRank))) lines.push(`- Global rank: #${Number(live.cgRank)}`)
+    if (Number.isFinite(Number(live.watchers))) lines.push(`- Watchlist followers: ${numShort(live.watchers)}`)
+    const circ = Number(live.circulatingSupply) || 0
+    const total = Number(live.totalSupply) || 0
+    if (circ > 0 && total >= circ) {
+      lines.push(`- Supply: ${numShort(circ)} circulating of ${numShort(total)} total (${((circ / total) * 100).toFixed(1)}% in circulation)`)
+    }
+    if (live.pairName || live.exchange) {
+      lines.push(`- Displayed market: ${[live.pairName, live.exchange].filter(Boolean).join(' on ')}`)
+    }
     // Structural memecoin risk read so both advocates argue over real risk numbers.
     const riskBlock = riskPromptBlock(assessMemecoinRisk(live))
     if (riskBlock) {
@@ -593,6 +611,7 @@ async function buildEvidencePack(symbol, live) {
     }
   }
 
+  let aboutShown = false
   if (ryoRes.status === 'fulfilled') {
     const u = unwrapRyo(ryoRes.value) || {}
     const ryoTrusted = !live?.ca || (cleanName(u.symbol) === cleanName(sym) && (!u.name || cleanName(u.name) === cleanName(name)))
@@ -604,7 +623,20 @@ async function buildEvidencePack(symbol, live) {
         lines.push('RESEARCH DESK LAYER:')
         if (desc) lines.push(`- About: ${desc}`)
         if (cats) lines.push(`- Categories: ${cats}`)
+        aboutShown = !!desc
       }
+    }
+  }
+  if (!aboutShown) {
+    // The resolved global listing carries verified project copy — the council
+    // must never argue about a token it knows nothing about.
+    const desc = typeof live?.description === 'string' ? live.description.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
+    const cats = Array.isArray(live?.categories) ? live.categories.filter(Boolean).slice(0, 6).join(', ') : ''
+    if (desc || cats) {
+      lines.push('')
+      lines.push('PROJECT CONTEXT:')
+      if (desc) lines.push(`- About: ${desc}`)
+      if (cats) lines.push(`- Categories: ${cats}`)
     }
   }
 

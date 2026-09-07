@@ -213,34 +213,24 @@ async function globalMarketOverlay(profile) {
   if (!sym || sym === 'UNKNOWN') return profile
 
   let g = null
-  let cgId = null
-  try {
-    const hits = (await cgSearch(sym)) || []
-    cgId =
-      hits
-        .filter((c) => cleanSymbol(c.symbol) === sym)
-        .sort((a, b) => (num(a.market_cap_rank) || 1e9) - (num(b.market_cap_rank) || 1e9))[0]?.id || null
-    if (cgId) {
-      const row = ((await cgMarkets([cgId])) || [])[0]
-      if (row) {
-        g = {
-          source: 'coingecko',
-          name: row.name || null,
-          price: num(row.current_price),
-          change: fin(row.price_change_percentage_24h_in_currency ?? row.price_change_percentage_24h),
-          marketCap: num(row.market_cap),
-          fdv: num(row.fully_diluted_valuation),
-          volume: num(row.total_volume),
-          rank: num(row.market_cap_rank) || null,
-          circulating: num(row.circulating_supply),
-        }
-      }
+  const coin = await canonicalCoin(sym)
+  if (coin) {
+    const md = coin.market_data || {}
+    g = {
+      source: 'coingecko',
+      name: coin.name || null,
+      price: num(md.current_price?.usd),
+      change: fin(md.price_change_percentage_24h),
+      marketCap: num(md.market_cap?.usd),
+      fdv: num(md.fully_diluted_valuation?.usd),
+      volume: num(md.total_volume?.usd),
+      rank: num(coin.market_cap_rank) || null,
+      circulating: num(md.circulating_supply),
     }
-  } catch (err) {
-    console.warn('[tokenResolver] global overlay (gecko) skipped:', err.message)
+    if (!g.marketCap && !g.volume && !g.price) g = null
   }
 
-  if (!g || (!g.marketCap && !g.volume)) {
+  if (!g) {
     try {
       const rawItem = (await cmcQuote(sym))?.data?.[sym]
       const items = Array.isArray(rawItem) ? rawItem : rawItem ? [rawItem] : []
@@ -258,7 +248,6 @@ async function globalMarketOverlay(profile) {
           rank: num(item.cmc_rank) || null,
           circulating: num(item.circulating_supply),
         }
-        cgId = null
       }
     } catch (err) {
       console.warn('[tokenResolver] global overlay (cmc) skipped:', err.message)
@@ -280,15 +269,192 @@ async function globalMarketOverlay(profile) {
   if (g.volume > 0) profile.volume24h = g.volume
   if (g.rank) profile.cgRank = profile.cgRank || g.rank
   if (g.circulating > 0) profile.circulatingSupply = profile.circulatingSupply || g.circulating
-  if (cgId) {
-    profile.cgCoinId = profile.cgCoinId || cgId
-    profile.cgUrl = profile.cgUrl || `https://www.coingecko.com/en/coins/${cgId}`
+  if (coin?.id) {
+    profile.cgCoinId = profile.cgCoinId || coin.id
+    profile.cgUrl = profile.cgUrl || coin.url || `https://www.coingecko.com/en/coins/${coin.id}`
   }
   if (g.name && (!profile.name || PAIR_LIKE_NAME.test(profile.name) || profile.name === profile.symbol)) {
     profile.name = g.name
   }
   profile.globalMarket = true
   profile.marketScope = 'global aggregate'
+  return profile
+}
+
+// ── CoinGecko as the global authority ──────────────────────────────────────
+// A search index is not an authority. DexScreener happily serves a counterfeit
+// mint wearing a blue-chip ticker with a self-reported "$843M" of liquidity,
+// while the real mint sits further down the list. CoinGecko publishes the
+// canonical contract address for every listed symbol, plus the artwork, copy,
+// links, supplies and all-time extremes — so it is consulted FIRST and every
+// pool-side claim is measured against it. Records are memoised per process:
+// one symbol costs one CoinGecko call, no matter how many pages ask.
+const coinRecords = new Map()
+const COIN_TTL = 15 * 60 * 1000
+
+function rememberCoin(coin) {
+  if (!coin?.id) return
+  coinRecords.set(coin.id, { at: Date.now(), coin })
+  if (coinRecords.size > 200) {
+    for (const [k, v] of coinRecords) {
+      if (Date.now() - v.at > COIN_TTL) coinRecords.delete(k)
+      else if (coinRecords.size < 150) break
+    }
+  }
+}
+
+function recallCoin(id) {
+  const hit = id ? coinRecords.get(id) : null
+  if (!hit) return null
+  if (Date.now() - hit.at > COIN_TTL) {
+    coinRecords.delete(id)
+    return null
+  }
+  return hit.coin
+}
+
+const canonMemo = new Map()
+
+/**
+ * The global CoinGecko record for a symbol: exact-symbol match, highest-ranked
+ * listing wins. Returns null (memoised) when the symbol has no global listing,
+ * so pure on-chain memecoins never pay for a second lookup.
+ */
+async function canonicalCoin(symbol) {
+  const sym = cleanSymbol(symbol)
+  if (!sym || sym === 'UNKNOWN') return null
+  const hit = canonMemo.get(sym)
+  if (hit && Date.now() - hit.at < COIN_TTL) return hit.coin
+
+  let coin = null
+  try {
+    const hits = (await cgSearch(sym)) || []
+    const id =
+      hits
+        .filter((c) => cleanSymbol(c.symbol) === sym)
+        .sort((a, b) => (num(a.market_cap_rank) || 1e9) - (num(b.market_cap_rank) || 1e9))[0]?.id || null
+    if (id) {
+      coin = await cgCoin(id)
+      if (!coin?.id) coin = null
+    }
+  } catch (err) {
+    console.warn(`[tokenResolver] canonical coin ${sym} skipped:`, err.message)
+  }
+  if (coin) rememberCoin(coin)
+  canonMemo.set(sym, { at: Date.now(), coin })
+  if (canonMemo.size > 300) {
+    for (const [k, v] of canonMemo) {
+      if (Date.now() - v.at > COIN_TTL) canonMemo.delete(k)
+      else if (canonMemo.size < 220) break
+    }
+  }
+  return coin
+}
+
+/** Every contract address CoinGecko publishes for a coin, across all networks. */
+function platformCAs(coin) {
+  const out = []
+  const add = (chain, ca) => {
+    const a = String(ca || '').trim()
+    if (a.length < 26) return
+    if (out.some((o) => o.ca.toLowerCase() === a.toLowerCase())) return
+    out.push({ chain: chain || null, ca: a })
+  }
+  for (const [chain, ca] of Object.entries(coin?.platforms || {})) add(chain, ca)
+  add(null, coin?.contract_address)
+  return out
+}
+
+// Pools quoted in a real trading asset carry the honest price. Exotic quotes
+// (a dead bridge token, a wrapped curiosity) are where fake numbers are born.
+const MAJOR_QUOTES = new Set([
+  'USDT', 'USDC', 'USDS', 'USDE', 'DAI', 'FDUSD', 'TUSD', 'USDP', 'PYUSD', 'BUSD',
+  'SOL', 'WSOL', 'ETH', 'WETH', 'BNB', 'WBNB', 'BTC', 'WBTC', 'CBBTC', 'MATIC', 'POL',
+  'AVAX', 'WAVAX', 'JITOSOL', 'MSOL', 'BNSOL', 'JUPSOL', 'WEETH', 'WSTETH', 'ARBITRUM',
+])
+
+/**
+ * Pick the pool that tells the truth: its price must agree with the global
+ * aggregate tape, it should be quoted in a real trading asset, and among those
+ * the deepest one wins. This is what turns "JUP / METORA at $928" into the live
+ * market everyone else is trading.
+ */
+function pickVettedGroup(groups, canonicalPrice) {
+  const ref = num(canonicalPrice)
+  const agrees = (px) => {
+    const p = num(px)
+    if (!ref || !p) return true
+    return p >= ref / 3 && p <= ref * 3
+  }
+  const honest = groups.filter((g) => agrees(g.pair?.priceUsd))
+  const poolOf = honest.length ? honest : groups
+  const scored = poolOf
+    .map((g) => {
+      const quote = cleanSymbol(g.pair?.quoteToken?.symbol)
+      const depth = num(g.liquidityUsd)
+      return { g, score: (depth > 0 ? depth : 1) * (MAJOR_QUOTES.has(quote) ? 1 : 0.3) }
+    })
+    .sort((a, b) => b.score - a.score)
+  return scored[0]?.g || groups[0]
+}
+
+/**
+ * Fill every remaining blank tile from the global listing: artwork, copy, links,
+ * supplies, rank, watchlists and all-time extremes. Never touches a headline
+ * number that the consensus gate has already settled.
+ */
+function applyGlobalCoinMetadata(profile, coin) {
+  if (!coin?.id) return profile
+  const md = coin.market_data || {}
+  const links = coin.links || {}
+
+  profile.cgCoinId = profile.cgCoinId || coin.id
+  profile.cgUrl = profile.cgUrl || coin.url || `https://www.coingecko.com/en/coins/${coin.id}`
+  profile.cgRank = profile.cgRank || num(coin.market_cap_rank) || null
+  profile.watchers = profile.watchers || num(coin.watchlist_portfolio_users) || null
+  profile.logo = profile.logo || coin.image?.large || coin.image?.small || null
+  profile.description = profile.description || (coin.description && coin.description.en) || null
+  if ((!profile.categories || !profile.categories.length) && Array.isArray(coin.categories)) {
+    profile.categories = coin.categories.filter(Boolean).slice(0, 6)
+  }
+  profile.website = profile.website || (links.homepage || []).find(Boolean) || null
+  if (!profile.websites || !profile.websites.length) profile.websites = normSites(links.homepage).slice(0, 4)
+  profile.whitepaper = profile.whitepaper || links.whitepaper || null
+  profile.explorer = profile.explorer || (links.blockchain_site || []).find(Boolean) || null
+  profile.twitter = profile.twitter || (links.twitter_screen_name ? `https://x.com/${links.twitter_screen_name}` : null)
+  profile.telegram =
+    profile.telegram || (links.telegram_channel_identifier ? `https://t.me/${links.telegram_channel_identifier}` : null)
+  profile.github = profile.github || (links.repos_url?.github || []).find(Boolean) || null
+  profile.ath = profile.ath || num(md.ath?.usd) || null
+  profile.athChangePct = profile.athChangePct || num(md.ath_change_percentage?.usd) || null
+  profile.athDate = profile.athDate || md.ath_date?.usd || null
+  profile.atl = profile.atl || num(md.atl?.usd) || null
+  profile.atlChangePct = profile.atlChangePct || num(md.atl_change_percentage?.usd) || null
+  profile.atlDate = profile.atlDate || md.atl_date?.usd || null
+  profile.circulatingSupply = profile.circulatingSupply || num(md.circulating_supply) || null
+  profile.totalSupply = profile.totalSupply || num(md.total_supply) || null
+  profile.marketCapFdvRatio = profile.marketCapFdvRatio || num(md.market_cap_fdv_ratio) || null
+  if (coin.name && (!profile.name || PAIR_LIKE_NAME.test(profile.name) || profile.name === profile.symbol)) {
+    profile.name = coin.name
+  }
+  rememberCoin(coin)
+  return profile
+}
+
+/** The pair feed carries its own branding and socials — use them before giving up. */
+function applyPairSocials(profile) {
+  const socials = Array.isArray(profile.socials) ? profile.socials : []
+  const pick = (re) => {
+    const hit = socials.find((s) => re.test(`${String(s?.type || '')} ${String(s?.url || '')}`))
+    return hit?.url || null
+  }
+  profile.twitter = profile.twitter || pick(/twitter|x\.com/i)
+  profile.telegram = profile.telegram || pick(/telegram/i)
+  profile.discord = profile.discord || pick(/discord/i)
+  profile.github = profile.github || pick(/github/i)
+  const sites = Array.isArray(profile.websites) ? profile.websites : []
+  profile.website = profile.website || sites[0]?.url || null
+  profile.explorer = profile.explorer || pick(/explorer|solscan|etherscan|basescan|bscscan/i)
   return profile
 }
 
@@ -397,6 +563,12 @@ function ageInDays(fromMs) {
 async function applyGeckoTerminal(profile) {
   const detail = await gtTokenDetail(profile.chain, profile.ca)
   const attrs = detail?.data?.attributes
+  // Was the pool we arrived through a broken venue? Its price sits light-years
+  // from the global tape — if so, the honest GeckoTerminal pool found below
+  // replaces it as the displayed market (pair, quote, venue and link).
+  const priceRef = num(profile.canonicalPriceUsd)
+  const dsPairBroken =
+    priceRef > 0 && profile.priceUsd > 0 && (profile.priceUsd < priceRef / 3 || profile.priceUsd > priceRef * 3)
 
   if (attrs) {
     profile.logo = profile.logo || attrs.image_url || null
@@ -417,11 +589,20 @@ async function applyGeckoTerminal(profile) {
     }
   }
 
-  // Deepest GeckoTerminal pool wins the exchange label and the candle feed.
+  // Deepest GeckoTerminal pool wins the exchange label and the candle feed —
+  // but only among pools whose price agrees with the global aggregate tape.
+  // A dead venue (a broken Meteora book quoting $928 for a $0.25 token) must
+  // never become the displayed market or the chart source.
   const pools = (Array.isArray(detail?.included) ? detail.included : []).filter((i) => i?.type === 'pool')
+  const poolAgrees = (pool) => {
+    const p = num(pool.attributes?.base_token_price_usd ?? pool.attributes?.token_price_usd)
+    if (!priceRef || !p) return true
+    return p >= priceRef / 3 && p <= priceRef * 3
+  }
+  const honestPools = pools.filter(poolAgrees)
   let bestPool = null
   let bestReserve = -1
-  for (const pool of pools) {
+  for (const pool of honestPools.length ? honestPools : pools) {
     const r = num(pool.attributes?.reserve_in_usd)
     if (r > bestReserve) {
       bestReserve = r
@@ -435,6 +616,15 @@ async function applyGeckoTerminal(profile) {
     profile.pairName = a.name || profile.pairName
     profile.exchange = prettyDex(bestPool.relationships?.dex?.data?.id) || profile.exchange
     profile.exchangeId = bestPool.relationships?.dex?.data?.id || profile.exchangeId
+    if (dsPairBroken) {
+      // Point the pair label, quote and link at the honest market instead of
+      // the broken venue the search index happened to serve.
+      const gtSlug = bestPool.relationships?.network?.data?.id || String(bestPool.id || '').split('_')[0]
+      if (a.address) profile.pairAddress = a.address
+      if (a.address && gtSlug) profile.dexUrl = `https://www.geckoterminal.com/${gtSlug}/pools/${a.address}`
+      const quoteHalf = String(a.name || '').split('/')[1]
+      if (quoteHalf) profile.quoteSymbol = cleanSymbol(quoteHalf) || profile.quoteSymbol
+    }
     profile.poolLiquidityUsd = num(a.reserve_in_usd) || profile.liquidityUsd
     if (a.pool_created_at) {
       const created = Date.parse(a.pool_created_at)
@@ -688,7 +878,6 @@ async function applyCoinGecko(profile) {
     coin = await cgCoinByCa(profile.chain, profile.ca)
   }
   if (!coin?.id) return profile
-  profile.cgCoinId = coin.id
 
   // Trust but verify: CoinGecko links can be stale. If the listed coin publishes
   // contract addresses, ours must be one of them — otherwise skip it entirely
@@ -702,6 +891,8 @@ async function applyCoinGecko(profile) {
     const wanted = profile.ca.toLowerCase()
     if (!listed.some((a) => a.toLowerCase() === wanted)) return profile
   }
+  profile.cgCoinId = coin.id
+  rememberCoin(coin)
 
   const md = coin.market_data || {}
   const links = coin.links || {}
@@ -828,6 +1019,18 @@ function restoreSticky(profile) {
 
 // Shared tail: everything found by CA or by search gets the same enrichment.
 async function hydrate(profile, candidates) {
+  // The global listing record is fetched once (memoised) and shared by every
+  // pass below: it anchors pool vetting with the canonical price, fills blank
+  // tiles with verified artwork/copy, and powers the aggregate overlay.
+  let canon = null
+  try {
+    canon = await canonicalCoin(profile.symbol)
+  } catch (err) {
+    console.warn('[tokenResolver] canonical coin skipped:', err.message)
+  }
+  const canonPrice = num(canon?.market_data?.current_price?.usd) || null
+  if (canonPrice) profile.canonicalPriceUsd = canonPrice
+
   if (profile.ca) {
     try {
       await applyGeckoTerminal(profile)
@@ -845,8 +1048,20 @@ async function hydrate(profile, candidates) {
       console.warn('[tokenResolver] coingecko chart skipped:', err.message)
     }
     restoreSticky(profile)
-    rememberSticky(profile)
   }
+
+  // Blank tiles get filled from a global listing ONLY when it is provably the
+  // same asset — our contract is one it publishes, or its price agrees with
+  // ours (the very same test the aggregate overlay below must pass before it
+  // dares overwrite our market numbers: one verdict, applied consistently).
+  // A ticker collision must never borrow another project's logo and copy.
+  const caMatches =
+    !!profile.ca && platformCAs(canon).some((c) => c.ca.toLowerCase() === String(profile.ca).toLowerCase())
+  const priceAgrees =
+    canonPrice > 0 && profile.priceUsd > 0 && canonPrice >= profile.priceUsd / 3 && canonPrice <= profile.priceUsd * 3
+  const canonIsThisAsset = !!canon && (caMatches || priceAgrees)
+  applyGlobalCoinMetadata(profile, canonIsThisAsset ? canon : recallCoin(profile.cgCoinId))
+  applyPairSocials(profile)
 
   // Headline metrics come from the global aggregate market, never from one
   // isolated pool: a bridge vault's "$25 volume" must not reach a dashboard.
@@ -865,6 +1080,16 @@ async function hydrate(profile, candidates) {
     profile.marketCap = profile.priceUsd * profile.circulatingSupply
   }
 
+  // Second chart chance: the first tape attempt can come back empty (throttled
+  // feed, or the CoinGecko id was only confirmed later in the pipeline).
+  if (!(profile.priceHistory || []).length && profile.cgCoinId) {
+    try {
+      await applyCoinGeckoTape(profile)
+    } catch (err) {
+      console.warn('[tokenResolver] coingecko chart retry skipped:', err.message)
+    }
+  }
+
   if (PAIR_LIKE_NAME.test(String(profile.name || ''))) {
     profile.name = String(profile.name).split('/')[0].trim()
   }
@@ -878,6 +1103,7 @@ async function hydrate(profile, candidates) {
     profile.priceHistory = []
     profile.chartSource = null
   }
+  if (profile.ca) rememberSticky(profile)
   return profile
 }
 
@@ -938,6 +1164,58 @@ async function majorCoinProfile(symbol) {
 }
 
 /**
+ * Contract address → the real live market for it. DexScreener first, with the
+ * global listing record vetting WHICH pool tells the truth (a counterfeit or
+ * broken venue quotes a price light-years from the aggregate tape — it loses
+ * to an honest, deeper, major-quoted pool). Then GeckoTerminal's cross-chain
+ * search, then the per-chain token record, then the launchpad that minted it.
+ * Returns null when no live venue answers — the caller decides how to fail.
+ */
+async function resolveByCa(ca, { matchType = 'contract', candidates = null } = {}) {
+  const pairs = (await dexPairsByCa(ca)) || []
+  const mine = pairs.filter((p) => String(p?.baseToken?.address || '').toLowerCase() === ca.toLowerCase())
+  const groups = groupPairs(mine.length ? mine : pairs.filter((p) => p?.baseToken))
+
+  if (groups.length) {
+    const canon = await canonicalCoin(cleanSymbol(groups[0].pair?.baseToken?.symbol))
+    const canonicalPrice = num(canon?.market_data?.current_price?.usd) || null
+    const pick = pickVettedGroup(groups, canonicalPrice)
+    const profile = identityFromPair(pick.pair)
+    profile.ca = ca
+    profile.isCA = true
+    profile.matchType = matchType
+    // Branding lives on ANY of the token's pools — the chosen one may lack it.
+    for (const p of pairs) {
+      const info = p?.info || {}
+      if (!profile.logo && info.imageUrl) profile.logo = info.imageUrl
+      if (!profile.banner && info.header) profile.banner = info.header
+      if (!(profile.socials || []).length && Array.isArray(info.socials) && info.socials.length) profile.socials = info.socials
+      if (!(profile.websites || []).length && Array.isArray(info.websites) && info.websites.length) {
+        profile.websites = normSites(info.websites)
+      }
+    }
+    return hydrate(profile, candidates || groups.slice(0, 6).map(candidateCard))
+  }
+
+  // DexScreener doesn't index every venue — ask GeckoTerminal directly.
+  const fallback = await geckoFallback(ca)
+  if (fallback) {
+    if (matchType !== 'contract') fallback.matchType = matchType
+    const deep = fallback.logo && fallback.description ? fallback : await deepenFromTokenRecord(fallback)
+    return hydrate(deep, [])
+  }
+
+  // Both indexers went quiet (they throttle shared cloud ranges hard). The
+  // per-chain token record, then the launchpad that minted it, still answer.
+  const record = (await gtTokenProfile(ca)) || (await pumpFunProfile(ca))
+  if (record) {
+    if (matchType !== 'contract') record.matchType = matchType
+    return hydrate(record, [])
+  }
+  return null
+}
+
+/**
  * Resolve ANY user input to a real, fully-enriched token identity.
  *   "GEuuz…pump" / "0x…" / a explorer URL → that exact token, on its exact chain
  *   "$ACE" / "dogwifhat"                  → highest-liquidity match + candidates[]
@@ -954,41 +1232,11 @@ export async function resolveToken(rawInput) {
 
   // ── 1. Contract address — the address is the identity, no ambiguity ──
   if (ca) {
-    const pairs = (await dexPairsByCa(ca)) || []
-    const mine = pairs.filter((p) => String(p?.baseToken?.address || '').toLowerCase() === ca.toLowerCase())
-    const groups = groupPairs(mine.length ? mine : pairs.filter((p) => p?.baseToken))
-
-    if (groups.length) {
-      const profile = identityFromPair(groups[0].pair)
-      profile.ca = ca
-      profile.isCA = true
-      profile.matchType = 'contract'
-      const out = await hydrate(profile, groups.slice(0, 6).map(candidateCard))
+    const out = await resolveByCa(ca)
+    if (out) {
       setCache(cacheKey, out, 5 * 60 * 1000)
       return out
     }
-
-    // DexScreener doesn't index every venue — ask GeckoTerminal directly.
-    const fallback = await geckoFallback(ca)
-    if (fallback) {
-      const deep =
-        fallback.logo && fallback.description
-          ? fallback
-          : await deepenFromTokenRecord(fallback)
-      const out = await hydrate(deep, [])
-      setCache(cacheKey, out, 5 * 60 * 1000)
-      return out
-    }
-
-    // Both indexers went quiet (they throttle shared cloud ranges hard). The
-    // per-chain token record, then the launchpad that minted it, still answer.
-    const record = (await gtTokenProfile(ca)) || (await pumpFunProfile(ca))
-    if (record) {
-      const out = await hydrate(record, [])
-      setCache(cacheKey, out, 5 * 60 * 1000)
-      return out
-    }
-
     throw new Error(`No live market found for ${shortAddr(ca)} — check the contract address and try again.`)
   }
 
@@ -1004,7 +1252,7 @@ export async function resolveToken(rawInput) {
     }
   }
 
-  // ── 3. Ticker or token name — search live, disambiguate by liquidity ──
+  // ── 3. Ticker or token name — search live, confirmed by the global listing ──
   const query = raw.replace(/^[$￥]+/, '')
   const pairs = (await dexSearch(query)) || []
   const groups = groupPairs(pairs)
@@ -1018,11 +1266,58 @@ export async function resolveToken(rawInput) {
       return name.includes(upper) || (sym && upper.includes(sym))
     })
     const ranked = byTicker.length ? byTicker : byName.length ? byName : groups
-    const profile = identityFromPair(ranked[0].pair)
-    profile.matchType = byTicker.length ? 'ticker' : byName.length ? 'name' : 'search'
+    const matchType = byTicker.length ? 'ticker' : byName.length ? 'name' : 'search'
     // Ambiguity is surfaced, not hidden: same ticker on different chains/mints.
     const candidates = groups.slice(0, 8).map(candidateCard)
-    const out = await hydrate(profile, candidates)
+
+    // A search index is not an authority: it serves counterfeit mints wearing
+    // blue-chip tickers with fabricated self-reported liquidity, ranked above
+    // the real mint. The global listing publishes the canonical contract
+    // addresses — when one of them has a live market in the results, THAT is
+    // the token, no matter where its pool ranked.
+    const canonSym = byTicker.length ? upper : cleanSymbol(ranked[0]?.pair?.baseToken?.symbol) || upper
+    const canon = await canonicalCoin(canonSym)
+    const canonPrice = num(canon?.market_data?.current_price?.usd) || null
+    const cas = platformCAs(canon)
+    const confirmed = cas.length
+      ? ranked.find((g) => cas.some((c) => c.ca.toLowerCase() === String(g.pair?.baseToken?.address || '').toLowerCase()))
+      : null
+
+    let out = null
+    if (confirmed) {
+      out = await resolveByCa(String(confirmed.pair.baseToken.address), { matchType, candidates })
+    }
+    if (!out && cas.length) {
+      // The global listing publishes contract addresses the search index never
+      // served (a bridge pair on some side-chain outranked the real mint).
+      // Resolve the canonical address directly — that IS the asset whose price
+      // the global tape is quoting, with its real artwork, pools and tape.
+      // Guard: only when the searched pairs' prices don't contradict the
+      // canonical tape — a same-ticker stranger keeps its own identity.
+      const searchAgrees =
+        canonPrice > 0 &&
+        ranked.some((g) => {
+          const p = num(g.pair?.priceUsd)
+          return p > 0 && p >= canonPrice / 3 && p <= canonPrice * 3
+        })
+      if (searchAgrees) {
+        for (const c of cas.slice(0, 3)) {
+          try {
+            out = await resolveByCa(c.ca, { matchType })
+          } catch (err) {
+            console.warn('[tokenResolver] canonical address resolve skipped:', err.message)
+          }
+          if (out) break
+        }
+      }
+    }
+    if (!out) {
+      // No canonical address confirmed: take the deepest pool whose price
+      // agrees with the global tape, quoted in a real trading asset.
+      const profile = identityFromPair(pickVettedGroup(ranked, canonPrice).pair)
+      profile.matchType = matchType
+      out = await hydrate(profile, candidates)
+    }
     setCache(cacheKey, out, 5 * 60 * 1000)
     return out
   }
