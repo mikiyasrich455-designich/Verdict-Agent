@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useRef } from 'react'
+import { Link, Navigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   ArrowRight, Activity, BarChart3, ShieldAlert, Zap, MessagesSquare,
@@ -8,6 +9,32 @@ import {
 } from 'lucide-react'
 import Logo from '../components/Logo'
 import { STANCES } from '../lib/stance'
+import { getActiveToken, tokenHref } from '../lib/activeToken'
+
+// Path the browser was loaded on. Module scope evaluates once per page load,
+// so clicking "back to home" inside the SPA never triggers the resume bounce —
+// only a genuine fresh load / refresh at the root does.
+const BOOT_PATH = typeof window !== 'undefined' ? window.location.pathname : ''
+
+// A returning visitor with a saved token lands on their last console screen
+// instead of an empty marketing page: refresh = back to your work, instantly.
+function resumeTarget() {
+  if (BOOT_PATH !== '/') return ''
+  const token = getActiveToken()
+  if (!token?.symbol) return ''
+  try {
+    const last = localStorage.getItem('verdict.lastRoute') || ''
+    if (last.startsWith('/dashboard')) return last
+  } catch {
+    /* storage unavailable — fall through to the console home */
+  }
+  return tokenHref('/dashboard', token)
+}
+
+// One-shot per page load: the ref keeps the value stable across StrictMode's
+// double render, and clearing the module var means a later in-session visit
+// to "/" (the "back to home" arrow) shows the marketing page normally.
+let pendingResume = resumeTarget()
 
 const AGENT_SKILLS = [
   { icon: ScanSearch, label: 'market scan' },
@@ -318,6 +345,11 @@ function LiveDashboardPreview() {
 }
 
 export default function LandingPage() {
+  // Refresh / reopen at the root with a live session → straight back to work.
+  const resume = useRef(pendingResume)
+  pendingResume = ''
+  if (resume.current) return <Navigate to={resume.current} replace />
+
   return (
     <div className="relative">
       {/* ── HERO ── */}

@@ -547,7 +547,17 @@ function IntelRail() {
 // ── shell ───────────────────────────────────────────────────────
 export default function DashboardShell() {
   const [drawer, setDrawer] = useState(false)
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+
+  // Remember the exact console screen the visitor was on so a fresh load at
+  // the site root can drop them straight back into their session.
+  useEffect(() => {
+    try {
+      localStorage.setItem('verdict.lastRoute', pathname + search)
+    } catch {
+      /* private-mode storage failures are non-fatal */
+    }
+  }, [pathname, search])
 
   return (
     <div className="cv-root fixed inset-0 z-20 flex bg-[#05070F]">

@@ -93,13 +93,24 @@ function persistDiskCache() {
   if (diskTimer) clearTimeout(diskTimer)
   diskTimer = setTimeout(() => {
     diskTimer = null
-    try {
+    const dump = () => {
       const out = {}
       for (const [key, entry] of cacheStore.entries()) out[key] = entry
       localStorage.setItem(CACHE_DISK_KEY, JSON.stringify(out))
+    }
+    try {
+      dump()
     } catch {
-      // quota exceeded — drop the mirror, the in-memory cache still works
-      try { localStorage.removeItem(CACHE_DISK_KEY) } catch { /* nothing else to do */ }
+      // quota exceeded — prune the oldest half and retry once, so a refresh
+      // still restores recent work instead of finding an empty mirror
+      try {
+        const oldest = [...cacheStore.entries()].sort((a, b) => (a[1].at || 0) - (b[1].at || 0))
+        for (let i = 0; i < Math.ceil(oldest.length / 2); i++) cacheStore.delete(oldest[i][0])
+        dump()
+      } catch {
+        // still over quota — drop the mirror, the in-memory cache still works
+        try { localStorage.removeItem(CACHE_DISK_KEY) } catch { /* nothing else to do */ }
+      }
     }
   }, 400)
 }
