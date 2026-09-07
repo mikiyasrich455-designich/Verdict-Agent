@@ -6,8 +6,6 @@ import {
   Newspaper, Brain, Scale,
   Monitor, RefreshCw, Settings, BadgeCheck, Link2,
 } from 'lucide-react'
-import DashboardMock from '../components/DashboardMock'
-import OpsDashboard from '../components/OpsDashboard'
 import Logo from '../components/Logo'
 
 const AGENT_SKILLS = [
@@ -278,6 +276,46 @@ function RegistryDiagram() {
   )
 }
 
+// The real product, embedded as the hero's first sight. Decoration only:
+// pointer events are off, it can't be focused, clicked or scrolled by visitors.
+function LiveDashboardPreview() {
+  return (
+    <div
+      className="relative rounded-2xl overflow-hidden border border-white/10 bg-[#05060f] shadow-[0_44px_130px_rgba(0,0,0,0.66),0_0_60px_rgba(88,113,255,0.12)] pointer-events-none select-none"
+      aria-hidden="true"
+    >
+      {/* window chrome */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.07] bg-white/[0.03]">
+        <span className="flex gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-[#ff5f57]/70" />
+          <span className="w-2 h-2 rounded-full bg-[#febc2e]/70" />
+          <span className="w-2 h-2 rounded-full bg-[#28c840]/70" />
+        </span>
+        <span className="ml-2 font-mono text-[10px] tracking-[0.18em] uppercase text-faint">
+          verdict · live operations
+        </span>
+        <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-success">
+          <span className="relative flex w-1.5 h-1.5">
+            <span className="absolute inline-flex w-full h-full rounded-full bg-success opacity-60 animate-ping" />
+            <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-success" />
+          </span>
+          live
+        </span>
+      </div>
+      <iframe
+        src="/dashboard"
+        title="Verdict dashboard preview"
+        tabIndex={-1}
+        scrolling="no"
+        className="block w-full h-[420px] sm:h-[540px] lg:h-[660px] border-0"
+        style={{ pointerEvents: 'none' }}
+      />
+      {/* fade the preview into the page background */}
+      <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent to-[#020208]" />
+    </div>
+  )
+}
+
 export default function LandingPage() {
   return (
     <div className="relative">
@@ -317,25 +355,19 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.35 }}
-            className="mt-12 flex flex-wrap items-center justify-center gap-4"
+            className="mt-12 flex items-center justify-center"
           >
             <Link
-              to="/verdict"
-              className="btn-primary hero-cta inline-flex items-center gap-2 px-7 h-12 rounded-full text-[14px] font-semibold text-white"
+              to="/dashboard"
+              className="btn-primary hero-cta inline-flex items-center gap-2.5 px-8 h-12 rounded-full text-[14px] font-semibold text-white"
             >
-              Explore Verdict
+              Put Your Token on Trial
               <ArrowRight size={16} />
-            </Link>
-            <Link
-              to="/dashboard/council"
-              className="btn-ghost hero-cta inline-flex items-center px-7 h-12 rounded-full text-[14px] font-semibold text-[#e2e9ff]"
-            >
-              Watch the Council
             </Link>
           </motion.div>
         </div>
 
-        {/* Operations Command Center dashboard */}
+        {/* The real dashboard, first sight — pure decoration, not interactive */}
         <div className="relative mt-16 md:mt-24 max-w-6xl mx-auto px-4">
           {/* dashed arcs above the frame */}
           <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-28 w-[880px] h-[440px] rounded-[100%] border border-dashed border-[#5871ff]/15" />
@@ -346,10 +378,9 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.45 }}
-            className="relative z-10 pointer-events-none select-none"
-            aria-hidden="true"
+            className="relative z-10"
           >
-            <OpsDashboard />
+            <LiveDashboardPreview />
           </motion.div>
         </div>
       </section>
@@ -367,7 +398,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── ORBIT SECTION ── */}
-      <section id="about" className="relative py-24 scroll-mt-24">
+      <section id="how" className="relative py-24 scroll-mt-24">
         <Traces />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-2xl mx-auto">
@@ -421,7 +452,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── HAND / NOISE VS SIGNAL ── */}
-      <section className="relative py-24 overflow-hidden">
+      <section id="discipline" className="relative py-24 scroll-mt-24 overflow-hidden">
         <Traces />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <span className="pill-badge">
@@ -484,7 +515,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── MONITOR SECTION ── */}
-      <section id="product" className="relative py-24 border-t border-line scroll-mt-24 overflow-hidden">
+      <section id="live" className="relative py-24 border-t border-line scroll-mt-24 overflow-hidden">
         <Traces />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto">
@@ -523,7 +554,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── WORKFLOW STEPS ── */}
-      <section className="relative py-24 border-t border-line">
+      <section id="workflow" className="relative py-24 border-t border-line scroll-mt-24">
         <Traces />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-2 gap-14 items-start">
           <div className="lg:sticky lg:top-28">
@@ -564,30 +595,26 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA ── */}
-      <section id="pricing" className="relative py-24 overflow-hidden scroll-mt-24">
+      <section id="start" className="relative py-24 overflow-hidden scroll-mt-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="relative rounded-2xl overflow-hidden border border-line bg-white/[0.05] backdrop-blur-sm p-10 md:p-14">
-            <div className="relative z-10 grid lg:grid-cols-2 gap-10 items-center">
-              <div>
-                <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-snow leading-tight">
-                  Make AI verdicts part
-                  <br />
-                  of how you trade.
-                </h2>
-                <p className="mt-4 text-sm text-muted max-w-sm leading-relaxed">
-                  Deploy evidence, debate and discipline across your whole watchlist.
-                </p>
-                <div className="mt-8 flex flex-wrap gap-3">
-                  <Link to="/verdict" className="btn-primary px-6 py-3 text-sm">
-                    <span>Get a Verdict</span>
-                  </Link>
-                  <Link to="/dashboard/council" className="btn-ghost px-6 py-3 text-sm">
-                    Start a Debate
-                  </Link>
-                </div>
-              </div>
-              <div className="hidden lg:block">
-                <DashboardMock compact />
+            <div className="relative z-10 max-w-xl mx-auto text-center">
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-snow leading-tight">
+                Make AI verdicts part
+                <br />
+                of how you trade.
+              </h2>
+              <p className="mt-4 text-sm text-muted leading-relaxed">
+                Deploy evidence, debate and discipline across your whole watchlist.
+              </p>
+              <div className="mt-8 flex justify-center">
+                <Link
+                  to="/dashboard"
+                  className="btn-primary inline-flex items-center gap-2.5 px-8 h-12 rounded-full text-[14px] font-semibold text-white"
+                >
+                  Put Your Token on Trial
+                  <ArrowRight size={16} />
+                </Link>
               </div>
             </div>
           </div>

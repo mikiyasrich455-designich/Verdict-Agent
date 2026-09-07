@@ -121,12 +121,12 @@ export function SkeletonChart({ className = '', h = 180 }) {
 export function PageSkeleton() {
   return (
     <div className="space-y-5 animate-fade-in" aria-busy="true" aria-label="Loading dashboard">
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <div className="skel" style={{ width: 220, height: 20 }} />
-          <div className="skel" style={{ width: 140, height: 11 }} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-2 min-w-0 flex-1">
+          <div className="skel" style={{ width: 220, maxWidth: '100%', height: 20 }} />
+          <div className="skel" style={{ width: 140, maxWidth: '100%', height: 11 }} />
         </div>
-        <div className="skel" style={{ width: 110, height: 34, borderRadius: 999 }} />
+        <div className="skel" style={{ width: 110, maxWidth: '100%', height: 34, borderRadius: 999 }} />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} />)}

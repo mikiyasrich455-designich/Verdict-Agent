@@ -395,9 +395,9 @@ function Topbar({ onMenu }) {
         <span className="cv-bell-dot" />
       </button>
 
-      <Link to="/verdict" className="cv-btn !rounded-full !px-4 !py-2">
+      <Link to="/verdict" className="cv-btn !rounded-full !px-3 sm:!px-4 !py-2" title="New verdict">
         <Plus size={14} strokeWidth={2.6} />
-        New Verdict
+        <span className="hidden sm:inline">New Verdict</span>
       </Link>
 
       <div className="relative flex items-center">

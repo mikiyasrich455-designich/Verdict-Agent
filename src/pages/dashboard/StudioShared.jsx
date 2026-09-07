@@ -6,6 +6,18 @@ import { Download, Trash2 } from 'lucide-react'
 
 const HISTORY_KEY = 'verdict_studio_history'
 
+// The one cover image used wherever media has no preview of its own (video
+// renderers ship an mp4, not a still). A fixed, clean artwork — never generated.
+export const STUDIO_COVER =
+  'https://res.cloudinary.com/dguexkgjw/image/upload/v1788729221/0aa5fee1-325e-4f36-a266-21c3d6e95144_y9sa6w.png'
+
+export function coverFor(url) {
+  if (!url) return STUDIO_COVER
+  if (/^data:image\//i.test(url)) return url
+  if (/\.(png|jpe?g|webp|gif|svg)(\?|#|$)/i.test(url)) return url
+  return STUDIO_COVER
+}
+
 export function loadStudioHistory() {
   try {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')

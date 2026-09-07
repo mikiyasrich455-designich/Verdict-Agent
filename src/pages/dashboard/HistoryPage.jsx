@@ -7,7 +7,7 @@ import { toPng } from 'html-to-image'
 import VerdictBadge from '../../components/VerdictBadge'
 import { PageHeader, Panel, EmptyState, fmtUsd, Chip } from '../../components/DashUI'
 import { loadReceipts, clearReceipts } from '../../data/receipts'
-import { loadStudioHistory, downloadDataUrl, ClearHistoryBtn } from './StudioShared'
+import { loadStudioHistory, downloadDataUrl, ClearHistoryBtn, coverFor } from './StudioShared'
 
 export default function HistoryPage() {
   const [receipts, setReceipts] = useState(() => loadReceipts())
@@ -73,18 +73,18 @@ export default function HistoryPage() {
                 <VerdictBadge verdict={r.verdict} size="sm" animate={false} />
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="glass-chip !justify-start flex-col !items-start gap-0.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                <div className="glass-chip !justify-start flex-col !items-start gap-0.5 min-w-0">
                   <span className="text-[9px] font-mono text-faint">CONFIDENCE</span>
-                  <span className="text-[12px] font-mono text-snow">{r.confidence}/100</span>
+                  <span className="text-[12px] font-mono text-snow truncate max-w-full">{r.confidence}/100</span>
                 </div>
-                <div className="glass-chip !justify-start flex-col !items-start gap-0.5">
+                <div className="glass-chip !justify-start flex-col !items-start gap-0.5 min-w-0">
                   <span className="text-[9px] font-mono text-faint">PRICE</span>
-                  <span className="text-[12px] font-mono text-snow">{fmtUsd(r.priceUsd)}</span>
+                  <span className="text-[12px] font-mono text-snow truncate max-w-full">{fmtUsd(r.priceUsd)}</span>
                 </div>
-                <div className="glass-chip !justify-start flex-col !items-start gap-0.5">
+                <div className="glass-chip !justify-start flex-col !items-start gap-0.5 min-w-0 col-span-2 sm:col-span-1">
                   <span className="text-[9px] font-mono text-faint">AS OF</span>
-                  <span className="text-[12px] font-mono text-snow">{new Date(r.asOf).toLocaleDateString()}</span>
+                  <span className="text-[12px] font-mono text-snow truncate max-w-full">{new Date(r.asOf).toLocaleDateString()}</span>
                 </div>
               </div>
 
@@ -131,22 +131,23 @@ export default function HistoryPage() {
                 )}
               </div>
               <div className="film-strip">
-                {renders.slice(0, 12).map((it) =>
-                  it.url || it.poster ? (
+                {renders.slice(0, 12).map((it) => {
+                  const src = it.url || it.poster || it.videoUrl || it.audioUrl
+                  return src ? (
                     <button
                       key={it.id}
                       type="button"
                       className="frame"
-                      style={{ backgroundImage: `url(${it.url || it.poster})` }}
+                      style={{ backgroundImage: `url(${coverFor(src)})` }}
                       title={`${it.symbol} · ${it.kind}`}
-                      onClick={() => window.open(it.url || it.poster, '_blank')}
+                      onClick={() => window.open(src, '_blank')}
                     />
                   ) : (
                     <Chip key={it.id} active>
                       <Mic size={11} /> {it.symbol}
                     </Chip>
                   )
-                )}
+                })}
               </div>
             </div>
           )}

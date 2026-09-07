@@ -8,7 +8,7 @@ import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioImage } from '../../lib/api'
 import { PageHeader, Panel, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
 import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
-import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
+import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn, STUDIO_COVER, coverFor } from './StudioShared'
 
 export default function ImageStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -124,9 +124,12 @@ function ImageStudioInner({ token, pick }) {
                 </motion.div>
               )}
               {phase === 'idle' && !error && (
-                <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6">
-                  <div className="empty-icon mx-auto mb-4"><ImageIcon size={22} /></div>
-                  <p className="text-[13px] text-muted">The canvas is empty. Generate to paint the verdict.</p>
+                <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-full min-h-[320px] relative">
+                  <img src={STUDIO_COVER} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover rounded-lg opacity-45" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
+                    <div className="empty-icon mx-auto mb-4"><ImageIcon size={22} /></div>
+                    <p className="text-[13px] text-snow/90">The canvas is empty. Generate to paint the verdict.</p>
+                  </div>
                 </motion.div>
               )}
               {error && (
@@ -150,7 +153,7 @@ function ImageStudioInner({ token, pick }) {
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <StudioHistoryStrip items={history.items} activeId={output?.id} onPick={(it) => { setOutput(it); setPhase('done') }} renderThumb={(it) => ({ backgroundImage: `url(${it.url})` })} />
+          <StudioHistoryStrip items={history.items} activeId={output?.id} onPick={(it) => { setOutput(it); setPhase('done') }} renderThumb={(it) => ({ backgroundImage: `url(${coverFor(it.url)})` })} />
         </div>
       </div>
     </>

@@ -60,9 +60,9 @@ function StancePill({ label, tone }) {
 function MiniChange({ k, v }) {
   const up = Number(v) >= 0
   return (
-    <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] py-2.5 text-center">
+    <div className="rounded-xl border border-[rgba(126,156,255,0.14)] bg-[rgba(255,255,255,0.03)] px-1 py-2.5 text-center">
       <MicroLabel>{k}</MicroLabel>
-      <p className={`mt-0.5 text-[15px] font-bold ${up ? 'cv-delta up' : 'cv-delta down'}`}>{fmtPct(v)}</p>
+      <p className={`mt-0.5 text-[13px] sm:text-[15px] font-bold truncate ${up ? 'cv-delta up' : 'cv-delta down'}`}>{fmtPct(v)}</p>
     </div>
   )
 }

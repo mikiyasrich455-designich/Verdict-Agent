@@ -8,7 +8,7 @@ import { useAgentData } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioVideo } from '../../lib/api'
 import { PageHeader, Panel, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
 import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
-import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn } from './StudioShared'
+import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn, STUDIO_COVER, coverFor } from './StudioShared'
 
 export default function VideoStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -145,6 +145,7 @@ function VideoStudioInner({ token, pick }) {
                       <video
                         key={shot}
                         src={shot}
+                        poster={coverFor(output.poster)}
                         controls
                         autoPlay
                         className="w-full rounded-lg"
@@ -166,7 +167,7 @@ function VideoStudioInner({ token, pick }) {
                       )}
                     </>
                   ) : (
-                    <img src={output.poster} alt={`${output.symbol} verdict clip`} className="w-full ken-burns" />
+                    <img src={coverFor(output.poster)} alt={`${output.symbol} verdict clip`} className="w-full ken-burns" />
                   )}
                 </motion.div>
               )}
@@ -204,7 +205,7 @@ function VideoStudioInner({ token, pick }) {
         items={history.items}
         activeId={output?.id}
         onPick={(it) => { setOutput(it); setClipIndex(0); setPhase('done') }}
-        renderThumb={(it) => ({ backgroundImage: `url(${it.poster})` })}
+        renderThumb={(it) => ({ backgroundImage: `url(${coverFor(it.poster)})` })}
       />
     </>
   )

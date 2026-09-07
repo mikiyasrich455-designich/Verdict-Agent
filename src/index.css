@@ -2153,3 +2153,49 @@ h1, h2, h3, h4 {
 .cv-ghost { border-radius: 16px; border: 1px solid rgba(126, 156, 255, 0.10); background: rgba(255, 255, 255, 0.03); animation: cv-pulse 1.4s ease-in-out infinite; }
 @keyframes cv-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
 
+/* ══════════════════════════════════════════════════════════════════
+   PHONE PASS — the console must read like a mobile app: nothing
+   chopped, nothing overflowing off-screen, every control reachable.
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* topbar stacks: controls on row one, full-width search on row two */
+  .cv-topbar {
+    height: auto; min-height: 60px;
+    flex-wrap: wrap; row-gap: 8px;
+    padding: 9px 12px;
+  }
+  .cv-topbar > form { order: 9; flex: 1 1 100%; max-width: none; margin: 0; }
+  .cv-top-search { height: 38px; border-radius: 11px; }
+
+  /* stat tiles: keep the numbers readable, drop the squeezed sparkline */
+  .cv-grid-stats { gap: 8px; }
+  .cv-stat-row { gap: 6px; }
+  .cv-stat-value { font-size: 15px; }
+
+  /* table-ish rows: tighter label column so values still fit */
+  .cv-rowline { gap: 8px; padding: 9px 0; font-size: 11.5px; }
+  .cv-rowline-label { flex: 0 0 84px; font-size: 9.5px; letter-spacing: 0.06em; }
+  .cv-rowline-cell { font-size: 11.5px; overflow-wrap: anywhere; }
+
+  /* token search hero: icon + input on one line, button full width below */
+  .cv-hero-search { flex-wrap: wrap; gap: 8px; padding: 10px; }
+  .cv-hero-search input { flex: 1 1 150px; }
+  .cv-hero-search .cv-btn { flex: 1 1 100%; justify-content: center; }
+
+  /* studios keep a sane frame height on a phone */
+  .studio-frame { min-height: 300px; }
+
+  /* skill drawer sized for a thumb, not a desktop */
+  .dash-mobile-panel { max-width: 320px; }
+}
+
+@media (max-width: 430px) {
+  .cv-stat-row .cv-spark { display: none; }
+}
+
+@media (max-width: 400px) {
+  .cv-topbar { gap: 8px; padding: 8px 10px; }
+  .cv-rowline-label { flex: 0 0 74px; }
+  .dash-mobile-panel { max-width: 300px; }
+}
+

@@ -19,7 +19,7 @@ const router = Router()
 router.use(resolveCaInBody)
 
 // ── RYO call helper ──────────────────────────────────────────────
-async function callRyoTool(toolName, body = {}) {
+async function callRyoTool(toolName, body = {}, timeoutMs = 20000) {
   const url = `${process.env.RYO_MCP_BASE}/tools/${toolName}/call`
   const res = await fetch(url, {
     method: 'POST',
@@ -28,7 +28,7 @@ async function callRyoTool(toolName, body = {}) {
       'Authorization': `Bearer ${process.env.RYO_MCP_KEY}`,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
 
   if (!res.ok) {
@@ -39,18 +39,20 @@ async function callRyoTool(toolName, body = {}) {
   return res.json()
 }
 
-// ── Deep forensic analysis: SERP + RYO + LLM (PARALLEL) ──────────
-async function deepAnalyze(symbol, live = null) {
-  const symbolUpper = symbol.toUpperCase()
-  const t0 = Date.now()
+// ── Stage budget: a slow source is abandoned, never fatal ─────────
+// Deep analysis used to wait up to 45s per search + 55s per model call, so one
+// hung upstream turned into a 100s+ page and an "operation was aborted" error.
+// Every stage now has a ceiling and a usable fallback value.
+function withBudget(promise, ms, fallback) {
+  let timer
+  const guard = new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms) })
+  return Promise.race([promise.catch(() => fallback), guard]).finally(() => clearTimeout(timer))
+}
 
-  // PARALLEL: RYO + 3x SERP queries all at once (was sequential = 9-15s)
-  console.log(`[DEEP] ${symbolUpper}: Starting parallel data fetch (RYO + 3x SERP)...`)
-  const [ryoRaw, serpResults] = await Promise.allSettled([
-    callRyoTool('analyze_token', { symbol: symbolUpper }).catch(e => {
-      console.log('[DEEP] RYO failed, continuing with SERP only:', e.message)
-      return null
-    }),
+// PARALLEL gather: RYO profile + 3 live searches at once, all inside one budget.
+async function gatherDeepData(symbolUpper) {
+  const [ryoRaw, serpRaw] = await Promise.allSettled([
+    callRyoTool('analyze_token', { symbol: symbolUpper }, 11000),
     (async () => {
       const queries = [
         `${symbolUpper} crypto price analysis 2026`,
@@ -59,14 +61,14 @@ async function deepAnalyze(symbol, live = null) {
       ]
       const allResults = []
       const results = await Promise.allSettled(
-        queries.map(q => callSearch(q, 5).catch(e => {
+        queries.map(q => callSearch(q, 5, 13000).catch(e => {
           console.log('[DEEP] SERP failed for query:', q, e.message)
           return null
         }))
       )
       for (const r of results) {
         // Live search returns { organic: [...] } (top level) or { data: { organic: [...] } }
-      const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
+        const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
         if (organic && Array.isArray(organic)) {
           allResults.push(...organic.slice(0, 5).map(item => ({
             title: item.title || '',
@@ -80,11 +82,30 @@ async function deepAnalyze(symbol, live = null) {
     })(),
   ])
 
+  if (ryoRaw.status === 'rejected') {
+    console.log('[DEEP] RYO failed, continuing with SERP only:', ryoRaw.reason?.message)
+  }
+  const ryoData = ryoRaw.status === 'fulfilled' && ryoRaw.value ? unwrapRyo(ryoRaw.value) : {}
+  const serpData = serpRaw.status === 'fulfilled' && Array.isArray(serpRaw.value) ? serpRaw.value : []
+  return { ryoData, serpData }
+}
+
+// ── Deep forensic analysis: SERP + RYO + LLM (PARALLEL) ──────────
+async function deepAnalyze(symbol, live = null) {
+  const symbolUpper = symbol.toUpperCase()
+  const t0 = Date.now()
+
+  // PARALLEL + BUDGETED: RYO and the three live searches run together and the
+  // whole gather stage is capped — one slow source can never stall the verdict.
+  console.log(`[DEEP] ${symbolUpper}: Starting parallel data fetch (RYO + 3x SERP)...`)
+  const { ryoData, serpData } = await withBudget(
+    gatherDeepData(symbolUpper),
+    17000,
+    { ryoData: {}, serpData: [] },
+  )
+
   const dataFetchTime = Date.now() - t0
   console.log(`[DEEP] ${symbolUpper}: Data fetch complete in ${dataFetchTime}ms`)
-
-  const ryoData = ryoRaw?.status === 'fulfilled' && ryoRaw?.value ? unwrapRyo(ryoRaw.value) : {}
-  const serpData = serpResults?.status === 'fulfilled' && serpResults?.value ? serpResults.value : []
 
   // Build comprehensive prompt with RYO + SERP data
   const asset = ryoData.asset || {}
@@ -168,29 +189,42 @@ IMPORTANT RULES:
 - bullScore + bearScore ≈ 100 (±15). Verdict: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD.
 - Ground all reasoning in the provided market data and web results. Never name the data providers, tools or models behind the inputs — write as an analyst, not an integration log.`
 
-  // Call the reasoning model for deep analysis
+  // Reasoning pass — capped. A slow or hung model must never become a dead page.
   console.log(`[DEEP] ${symbolUpper}: Calling reasoning model for analysis...`)
   const tLlmStart = Date.now()
-  let response = await callLLM([
-    { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
-    { role: 'user', content: prompt },
-  ], QWEN_MODELS.reason, 3000, { timeoutMs: 55000 })
-  let analysis = extractJson(response)
-
-  // Retry once if the model did not return parseable JSON
-  if (!analysis) {
-    console.log('[DEEP] Response was not valid JSON, retrying once...')
-    response = await callLLM([
-      { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
-      { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
-    ], QWEN_MODELS.reason, 3000, { timeoutMs: 40000 })
+  let analysis = null
+  try {
+    const response = await callLLM([
+      { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
+      { role: 'user', content: prompt },
+    ], QWEN_MODELS.reason, 2000, { timeoutMs: 34000 })
     analysis = extractJson(response)
+  } catch (e) {
+    console.log('[DEEP] reasoning pass failed:', e.message)
   }
+
+  // One cheap, fast retry — lighter model, JSON mode, short leash.
   if (!analysis) {
-    throw new Error('Analysis response did not contain valid JSON')
+    console.log('[DEEP] No parseable JSON yet, retrying once on the fast model...')
+    try {
+      const retry = await callLLM([
+        { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
+        { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
+      ], QWEN_MODELS.chat, 1600, { timeoutMs: 18000, json: true, temperature: 0.2 })
+      analysis = extractJson(retry)
+    } catch (e) {
+      console.log('[DEEP] retry pass failed:', e.message)
+    }
+  }
+
+  // Last resort: score the live numbers we already hold. The page always renders.
+  const degraded = !analysis
+  if (degraded) {
+    console.log(`[DEEP] ${symbolUpper}: falling back to the live-data verdict`)
+    analysis = liveDataFallback({ priceUsd, change24h, perf, tech, marketCapUsd, volume24hUsd, liquidityUsd: liveLiq })
   }
   const llmTime = Date.now() - tLlmStart
-  console.log(`[DEEP] ${symbolUpper}: Reasoning response received in ${llmTime}ms`)
+  console.log(`[DEEP] ${symbolUpper}: Reasoning response received in ${llmTime}ms${degraded ? ' (degraded)' : ''}`)
 
   // Validate and return (accepts nested {score,reasoning} or flat xxxScore/xxxReasoning keys)
   return {
@@ -222,6 +256,78 @@ IMPORTANT RULES:
       llmMs: llmTime,
       totalMs: Date.now() - t0,
     },
+  }
+}
+
+// ── Deterministic last-resort verdict ────────────────────────────
+// If neither reasoning pass answers inside the budget we still hold live market
+// numbers. Score from them honestly instead of failing the page.
+function usd(n) {
+  const v = Number(n) || 0
+  if (v >= 1000) return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  if (v >= 1) return `$${v.toFixed(2)}`
+  return `$${v.toPrecision(3)}`
+}
+
+function liveDataFallback({ priceUsd, change24h, perf, tech, marketCapUsd, volume24hUsd, liquidityUsd }) {
+  const ch = Number(change24h) || 0
+  const mom = Number(perf?.momentum_30d_pct) || 0
+  const rsi = Number(tech?.rsi_14)
+  const hasRsi = Number.isFinite(rsi) && rsi > 0
+  const cap = Number(marketCapUsd) || 0
+  const vol = Number(volume24hUsd) || 0
+  const liq = Number(liquidityUsd) || 0
+  const turnover = cap > 0 ? vol / cap : 0
+  const p = Number(priceUsd) || 0
+
+  let bull = 50
+  bull += Math.max(-18, Math.min(18, ch * 1.2))
+  bull += Math.max(-12, Math.min(12, mom * 0.25))
+  if (hasRsi) bull += rsi < 30 ? 8 : rsi > 70 ? -8 : 2
+  bull += turnover > 0.15 ? 6 : turnover > 0 && turnover < 0.02 ? -6 : 0
+  if (liq > 0 && liq < 100000) bull -= 10
+
+  const bullScore = clampScore(bull)
+  const bearScore = clampScore(100 - bullScore)
+  const verdict = bullScore > bearScore + 15 ? 'BUY' : bearScore > bullScore + 15 ? 'AVOID' : 'HOLD'
+
+  return {
+    verdict,
+    confidence: clampScore(38 + Math.min(14, Math.abs(ch) * 0.6)),
+    bullScore,
+    bearScore,
+    summary: `Live tape read: ${ch >= 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(2)}% over 24h with ${usd(vol)} traded against a ${usd(cap)} cap. The reasoning pass did not answer inside the time budget, so this verdict is scored strictly from the market numbers above.`,
+    bullReasons: [
+      ch >= 0 ? `Price is holding a ${ch.toFixed(2)}% gain over 24h.` : `Sellers are in control: ${ch.toFixed(2)}% over 24h.`,
+      turnover > 0.08 ? `Turnover is active at ${(turnover * 100).toFixed(1)}% of market cap.` : `Turnover is thin at ${(turnover * 100).toFixed(1)}% of market cap.`,
+      hasRsi ? `RSI(14) sits at ${rsi.toFixed(0)}.` : 'No reliable RSI reading on this feed.',
+    ],
+    bearReasons: [
+      liq > 0 && liq < 250000 ? `Liquidity is light at ${usd(liq)} — exits can slip.` : `Liquidity reads ${liq > 0 ? usd(liq) : 'unavailable'} on this feed.`,
+      mom < 0 ? `30-day momentum is negative at ${mom.toFixed(2)}%.` : `30-day momentum is ${mom.toFixed(2)}%.`,
+      'This run is a data-only score: the qualitative layer did not return in time.',
+    ],
+    technical: {
+      score: clampScore(hasRsi ? (rsi < 30 ? 65 : rsi > 70 ? 35 : 52) : 50),
+      reasoning: `Scored from RSI(14) ${hasRsi ? rsi.toFixed(0) : 'n/a'} and a ${ch.toFixed(2)}% 24h move.`,
+    },
+    market: {
+      score: clampScore(50 + Math.max(-20, Math.min(20, turnover * 100))),
+      reasoning: `${usd(vol)} of 24h volume against a ${usd(cap)} cap (${(turnover * 100).toFixed(1)}% turnover).`,
+    },
+    risk: {
+      score: clampScore(liq > 0 && liq < 250000 ? 70 : 50),
+      reasoning: liq > 0 ? `Depth of ${usd(liq)} drives this risk read.` : 'No depth reading available — treated as elevated risk.',
+    },
+    catalyst: { score: 50, reasoning: 'No catalyst data in this run; scored neutral rather than guessed.' },
+    sentiment: {
+      score: clampScore(50 + Math.max(-20, Math.min(20, ch))),
+      reasoning: `Tape-derived only: ${ch.toFixed(2)}% over 24h.`,
+    },
+    keyLevels: p > 0
+      ? { support: usd(p * 0.92), resistance: usd(p * 1.1), stopLoss: usd(p * 0.88), target: usd(p * 1.18) }
+      : {},
+    finalThesis: `Data-only verdict: ${verdict} at ${bullScore}/${bearScore} bull-bear. Re-run for the full forensic read with news and reasoning.`,
   }
 }
 
@@ -357,7 +463,15 @@ router.post('/verdict', async (req, res) => {
     }
 
     console.log('[VERDICT] Running deep forensic analysis...')
-    const data = await deepAnalyze(symbol, req.tokenIdentity)
+    // Hard outer ceiling: even if a stage hangs past its own budget the caller
+    // gets a clean message, never a raw "operation was aborted".
+    const data = await withBudget(deepAnalyze(symbol, req.tokenIdentity), 75000, null)
+    if (!data) {
+      log('POST', '/synthesis/verdict', 504, Date.now() - start)
+      return res.status(504).json({
+        error: 'The research pass ran past its time budget. Try again — the first hit warms the cache.',
+      })
+    }
 
     console.log(`[VERDICT] Analysis complete: ${data.verdict} ${data.confidence}% (${data.timing?.totalMs}ms)`)
     setCache(cacheKey, data, 30 * 60 * 1000)
