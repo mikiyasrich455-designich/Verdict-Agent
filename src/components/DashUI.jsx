@@ -7,7 +7,7 @@ const POPULAR_TOKENS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX'
 // Which upstream services answered is an implementation detail — it never reaches
 // the user, not even inside an error message.
 const PROVIDER_WORDS =
-  /\b(ryo[\s_-]?(chan|mcp)?|coingecko|dexscreener|gecko\s?terminal|acedata|ace\s?data|groq|qwen|grok|seedream|seedance|flux|serp|serpapi|moonshot|kimi|deepseek|openai|chatgpt|gemini|anthropic|claude|mistral|llama|ark|tts)\b/gi
+  /\b(ryo[\s_-]?(chan|mcp)?|coingecko|dexscreener|gecko\s?terminal|acedata|ace\s?data|groq|qwen|grok|seedream|seedance|flux|serp|serpapi|moonshot|kimi|deepseek|openai|chatgpt|gemini|anthropic|claude|mistral|llama|ark|tts|sora|veo|cmc|coinmarketcap|dashscope|aliyun|wan)\b/gi
 
 export const fmtUsd = (v) => {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return '—'

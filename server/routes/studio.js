@@ -50,7 +50,7 @@ router.post('/chat', async (req, res) => {
   }
 
   try {
-    const content = await callLLM(messages, undefined, maxTokens)
+    const content = await callLLM(messages, QWEN_MODELS.chat, Math.min(Number(maxTokens) || 900, 1200), { timeoutMs: 30000 })
     log('POST', '/studio/chat', 200, Date.now() - start)
     res.json({ content })
   } catch (err) {

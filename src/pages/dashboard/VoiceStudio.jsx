@@ -152,7 +152,7 @@ function VoiceStudioInner({ token }) {
     )
   }
 
-  const providerLabel = output?.audioUrl ? (output.provider === 'qwen' ? 'QWEN TTS VOICE' : 'ACEDATA TTS VOICE') : 'BROWSER VOICE'
+  const providerLabel = output?.audioUrl ? 'STUDIO VOICE' : 'BROWSER VOICE'
 
   return (
     <div className="space-y-4">

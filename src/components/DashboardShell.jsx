@@ -8,7 +8,7 @@ import {
   TrendingUp, Globe, Crosshair, Microscope, Scale, Gauge,
   Gavel, Swords, Megaphone, Radio, Clapperboard, ImageIcon, Film, AudioWaveform,
   Cpu, ShieldAlert, History, LayoutDashboard, Menu, X,
-  Search, Sparkles, CornerDownLeft, ArrowLeft, Bell, Plus, ChevronDown, Gem, Activity,
+  Search, Sparkles, CornerDownLeft, ArrowLeft, Bell, Plus, ChevronDown, Gem, Activity, Crown,
 } from 'lucide-react'
 import Logo from './Logo'
 import { resolveToken } from '../lib/api'
@@ -100,6 +100,7 @@ export const NAV_TREE = [
     label: 'SYSTEM',
     icon: Cpu,
     skills: [
+      { to: '/dashboard/final', label: 'Final Verdict', icon: Crown, hint: 'Every agent, one read' },
       { to: '/dashboard/risk', label: 'Risk Desk', icon: ShieldAlert, hint: 'Position & exit plan' },
       { to: '/dashboard/history', label: 'History', icon: History, hint: 'Decision receipts' },
     ],
@@ -110,7 +111,7 @@ export const NAV_TREE = [
 const TOKEN_SCOPED = [
   '/dashboard/analysis', '/dashboard/deep', '/dashboard/council',
   '/dashboard/narrative', '/dashboard/risk', '/dashboard/compare',
-  '/dashboard/overview',
+  '/dashboard/overview', '/dashboard/final',
   '/dashboard/studio/image', '/dashboard/studio/video', '/dashboard/studio/voice',
 ]
 
@@ -136,6 +137,7 @@ export const RAIL_AGENTS = [
   { to: '/dashboard/sentiment', icon: Gauge, name: 'Sentiment Shift', desc: 'Social & sentiment tracking', tone: 'cyan' },
   { to: '/dashboard/narrative', icon: Radio, name: 'KOL Radar', desc: 'Influencer & narrative monitoring', tone: 'violet' },
   { to: '/dashboard/council', icon: Swords, name: 'Bull vs Bear', desc: 'Adversarial council debate', tone: 'blue' },
+  { to: '/dashboard/final', icon: Crown, name: 'Final Recommendation', desc: 'Every agent, one reconciled read', tone: 'amber' },
 ]
 
 // ── sidebar ─────────────────────────────────────────────────────

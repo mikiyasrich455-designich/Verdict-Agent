@@ -1,7 +1,7 @@
 // ConsoleUI — the v2 design kit for every agent dashboard.
 // One cosmic-glass language: answer-first banners, glowing stat tiles, real-number
 // sparklines, evidence rows and source links. No page invents its own look anymore.
-import { useId } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, ExternalLink } from 'lucide-react'
 
@@ -294,5 +294,37 @@ export function LivePill({ label = 'Live' }) {
       <i />
       {label}
     </span>
+  )
+}
+
+// ── ProgressMeter — animated wait bar for every slow agent ─────────────────
+// Pass `value` (0-100) when real progress is trackable; otherwise it eases
+// toward ~96% on a timer so the user always sees movement, never a dead screen.
+export function ProgressMeter({ value = null, label = 'Agent is working…', tone = 'blue' }) {
+  const color = TONES[tone] || TONES.blue
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (value !== null) return undefined
+    const id = setInterval(() => setTick((t) => t + 1), 350)
+    return () => clearInterval(id)
+  }, [value])
+  const pct = value !== null
+    ? Math.max(0, Math.min(100, Math.round(Number(value) || 0)))
+    : Math.min(96, Math.round(96 * (1 - Math.exp(-tick / 12))))
+  return (
+    <div className="w-full">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <MicroLabel>{label}</MicroLabel>
+        <span className="font-mono text-[11px] font-bold tracking-[0.1em]" style={{ color }}>{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full border border-white/5 bg-white/[0.07]">
+        <motion.div
+          className="h-full rounded-full"
+          animate={{ width: `${pct}%` }}
+          transition={{ type: 'spring', stiffness: 120, damping: 24 }}
+          style={{ background: `linear-gradient(90deg, ${color}55, ${color})`, boxShadow: `0 0 12px ${color}66` }}
+        />
+      </div>
+    </div>
   )
 }

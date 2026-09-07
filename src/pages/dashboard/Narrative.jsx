@@ -12,7 +12,7 @@ import { fetchNarrative } from '../../lib/api'
 import { ErrorState } from '../../components/DashUI'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, SourceRow,
-  MicroLabel, LivePill, TONES,
+  MicroLabel, LivePill, ProgressMeter, TONES,
 } from '../../components/ConsoleUI'
 
 
@@ -174,6 +174,9 @@ function Loading() {
         <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
           <span className="font-mono text-sm">sweeping the loudest voices…</span>
+        </div>
+        <div className="mt-4 w-full max-w-md">
+          <ProgressMeter value={null} label="sweeping voices" tone="violet" />
         </div>
         <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
           {steps.map((s) => (

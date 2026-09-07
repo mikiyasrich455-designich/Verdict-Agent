@@ -1,7 +1,7 @@
 // Risk Desk agent — the Buy-the-Dip discipline layer.
 // User tunes limits with sliders; the desk returns signal checks and
 // a sized entry / stop / target plan built from ATR.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ShieldAlert, RefreshCw, Check, X, Crosshair, SlidersHorizontal, Sigma, Target, Gauge, Microscope, Swords } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -81,10 +81,16 @@ export default function RiskDesk() {
   const [searchParams, setSearchParams] = useSearchParams()
   const token = searchParams.get('token')
   const [limits, setLimits] = useState({ maxPosition: 5, stopLoss: 8, minConviction: 60 })
+  const [queryLimits, setQueryLimits] = useState(limits)
+  // Sliders fire on every pixel of movement — settle the drag before asking the desk to re-check.
+  useEffect(() => {
+    const id = setTimeout(() => setQueryLimits(limits), 400)
+    return () => clearTimeout(id)
+  }, [limits])
   const [runKey, rerun] = useRunKey()
   const { status, data, error: agentError } = useAgentData(
-    () => (token ? fetchRiskDesk(token, limits) : null),
-    [token, limits.maxPosition, limits.stopLoss, limits.minConviction, runKey]
+    () => (token ? fetchRiskDesk(token, queryLimits) : null),
+    [token, queryLimits.maxPosition, queryLimits.stopLoss, queryLimits.minConviction, runKey]
   )
 
   const pick = (t) => setSearchParams({ token: t })

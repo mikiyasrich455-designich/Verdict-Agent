@@ -28,6 +28,7 @@ async function callRyoTool(toolName, body = {}) {
       'Authorization': `Bearer ${process.env.RYO_MCP_KEY}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000),
   })
 
   if (!res.ok) {
@@ -173,7 +174,7 @@ IMPORTANT RULES:
   let response = await callLLM([
     { role: 'system', content: 'You are a world-class crypto research analyst. Respond with ONLY one valid JSON object, no markdown fences, no commentary. Be thorough, specific, and evidence-based.' },
     { role: 'user', content: prompt },
-  ], undefined, 4000)
+  ], QWEN_MODELS.reason, 3000, { timeoutMs: 55000 })
   let analysis = extractJson(response)
 
   // Retry once if the model did not return parseable JSON
@@ -182,7 +183,7 @@ IMPORTANT RULES:
     response = await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
-    ], undefined, 4000)
+    ], QWEN_MODELS.reason, 3000, { timeoutMs: 40000 })
     analysis = extractJson(response)
   }
   if (!analysis) {
@@ -313,7 +314,7 @@ Respond with ONLY a valid JSON object:
   const text = await callLLM([
     { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
     { role: 'user', content: prompt },
-  ], undefined, 2000)
+  ], QWEN_MODELS.reason, 1200, { timeoutMs: 40000 })
 
   const parsed = extractJson(text)
   if (!parsed) return null
@@ -330,73 +331,6 @@ Respond with ONLY a valid JSON object:
   const bull = clampScore(firstNum(s.bull))
   const bear = clampScore(firstNum(s.bear))
   return { catalysts, risks, sentiment: { bull, bear, neutral: Math.max(0, 100 - bull - bear) } }
-}
-
-// ── Generate detailed script from deep research ──────────────────
-async function generateDetailedScript(symbol, verdictData) {
-  const symbolUpper = symbol.toUpperCase()
-
-  // Build research prompt for long-form script
-  const prompt = `Write a DETAILED, PROFESSIONAL voiceover script for a crypto analysis video about ${symbolUpper}.
-
-VERDICT DATA:
-- Symbol: ${symbolUpper}
-- Name: ${verdictData.name || symbolUpper}
-- Price: $${(verdictData.priceUsd || 0).toLocaleString()}
-- 24H Change: ${verdictData.change24h || 0}%
-- Verdict: ${verdictData.verdict}
-- Confidence: ${verdictData.confidence}%
-- Bull Score: ${verdictData.bullScore}%
-- Bear Score: ${verdictData.bearScore}%
-
-PILLARS:
-${Object.entries(verdictData.scores || {}).map(([k, v]) => `- ${k.toUpperCase()}: ${v.score}/100 — ${v.reasoning}`).join('\n')}
-
-BULL CASE:
-${(verdictData.bullReasons || []).map(r => `- ${r}`).join('\n')}
-
-BEAR CASE:
-${(verdictData.bearReasons || []).map(r => `- ${r}`).join('\n')}
-
-SUMMARY: ${verdictData.summary}
-
-SCRIPT REQUIREMENTS:
-1. LENGTH: 300-500 words (approximately 2-3 minutes spoken)
-2. TONE: Professional, authoritative, data-driven. No hype, no fear-mongering.
-3. STRUCTURE:
-   - OPENING (30-40 words): Hook with current price action and verdict
-   - MARKET CONTEXT (60-80 words): Where does this asset sit in the market?
-   - BULL ARGUMENTS (80-100 words): Detailed case for going long
-   - BEAR ARGUMENTS (80-100 words): Detailed risks and concerns
-   - KEY LEVELS (40-50 words): Support, resistance, entry zones
-   - CONCLUSION (40-50 words): Final verdict with conviction statement
-4. STYLE:
-   - Use specific numbers from the data
-   - Reference technical indicators by name (RSI, ATR, etc.)
-   - Mention catalysts and risks by name
-   - No generic filler — every sentence must add value
-   - Sound like a seasoned institutional analyst, not a YouTuber
-5. END with: "This is not financial advice. Trade the evidence, not the noise."
-
-Write the complete script now. No placeholders, no [pause], no instructions. Just the spoken text.`
-
-  const response = await callLLM([
-    { role: 'system', content: 'You are a professional financial content writer. Write clear, engaging, data-driven scripts for financial analysis videos. Always deliver complete scripts with no placeholders.' },
-    { role: 'user', content: prompt },
-  ], undefined, 3000)
-
-  // Clean up the response — remove markdown if present
-  let script = response
-    .replace(/^```[\s]*\n?/, '')
-    .replace(/\n?```$/, '')
-    .trim()
-
-  // Ensure it ends with the required disclaimer
-  if (!script.toLowerCase().includes('not financial advice')) {
-    script += '\n\nThis is not financial advice. Trade the evidence, not the noise.'
-  }
-
-  return script
 }
 
 // ── Routes ───────────────────────────────────────────────────────
@@ -497,8 +431,8 @@ async function buildEvidencePack(symbol, live) {
 
   const [ryoRes, newsRes, riskRes] = await Promise.allSettled([
     callRyoTool('analyze_token', { symbol: sym }),
-    callSearch(`${name} ${sym} crypto token latest news price`, 6, 30000),
-    callSearch(`${name} ${sym} crypto token risk liquidity concerns`, 6, 30000),
+    callSearch(`${name} ${sym} crypto token latest news price`, 6, 18000),
+    callSearch(`${name} ${sym} crypto token risk liquidity concerns`, 6, 18000),
   ])
 
   const lines = []
@@ -551,16 +485,16 @@ async function runCouncil(symbol, live) {
   const name = live?.name || sym
   const evidence = await buildEvidencePack(symbol, live)
 
-  // Round 1 — independent opening cases (parallel, hard 45s ceiling each)
+  // Round 1 — independent opening cases (parallel, hard 25s ceiling each)
   const [bullOpenRes, bearOpenRes] = await Promise.all([
     callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 90-130 words. Cite specific numbers from the pack.` },
-    ], QWEN_MODELS.bull, 800, { timeoutMs: 45000 }).catch(() => ''),
+    ], QWEN_MODELS.bull, 500, { timeoutMs: 25000 }).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 90-130 words. Cite specific numbers from the pack.` },
-    ], QWEN_MODELS.bear, 800, { timeoutMs: 45000 }).catch(() => ''),
+    ], QWEN_MODELS.bear, 500, { timeoutMs: 25000 }).catch(() => ''),
   ])
   const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
   const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
@@ -570,11 +504,11 @@ async function runCouncil(symbol, live) {
     callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
-    ], QWEN_MODELS.bull, 700, { timeoutMs: 40000 }).catch(() => ''),
+    ], QWEN_MODELS.bull, 400, { timeoutMs: 22000 }).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
-    ], QWEN_MODELS.bear, 700, { timeoutMs: 40000 }).catch(() => ''),
+    ], QWEN_MODELS.bear, 400, { timeoutMs: 22000 }).catch(() => ''),
   ])
   const bullRebut = String(bullRebutRes || '').trim() || bullOpen
   const bearRebut = String(bearRebutRes || '').trim() || bearOpen
@@ -595,12 +529,12 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
   let judge = extractJson(await callLLM([
     { role: 'system', content: JUDGE_ROLE },
     { role: 'user', content: judgePrompt },
-  ], QWEN_MODELS.judge, 900, { timeoutMs: 50000 }).catch(() => ''))
+  ], QWEN_MODELS.judge, 600, { timeoutMs: 35000 }).catch(() => ''))
   if (!judge) {
     judge = extractJson(await callLLM([
       { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
       { role: 'user', content: judgePrompt },
-    ], QWEN_MODELS.judge, 900, { timeoutMs: 35000 }).catch(() => ''))
+    ], QWEN_MODELS.judge, 600, { timeoutMs: 25000 }).catch(() => ''))
   }
 
   const bull100 = clampScore(firstNum(judge?.bullScore))
@@ -717,17 +651,16 @@ router.post('/risk', async (req, res) => {
   }
 
   try {
-    const cacheKey = `synthesis:risk:${symbol.toLowerCase()}`
-    const cached = getCache(cacheKey)
-    if (cached) {
-      log('POST', '/synthesis/risk', 200, Date.now() - start, '(cached)')
-      return res.json(cached)
+    // Cache the RAW upstream payload, not the shaped result — limits change per request,
+    // so slider moves must re-normalize instantly instead of hitting the network again.
+    const cacheKey = `synthesis:risk:raw:${symbol.toLowerCase()}`
+    let raw = getCache(cacheKey)
+    if (!raw) {
+      raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
+      setCache(cacheKey, raw, 5 * 60 * 1000)
     }
-
-    const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
     const data = normalizeRiskDesk(raw, limits)
 
-    setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/synthesis/risk', 200, Date.now() - start)
     res.json(data)
   } catch (err) {
@@ -817,6 +750,216 @@ router.post('/script', async (req, res) => {
     console.error('[SCRIPT ERROR]', err)
     error('script', err)
     res.status(500).json({ error: err.message, stack: err.stack })
+  }
+})
+
+// ── Final recommendation: one master pass over every other agent ──
+// The client gathers each agent in parallel and hands the payloads here, so this
+// route never re-fetches: it compresses what arrived and makes ONE model call.
+const FINAL_STANCES = [
+  'SPECULATIVE ACCUMULATE',
+  'WAIT FOR CONFIRMATION',
+  'HOLD & MONITOR',
+  'REDUCE EXPOSURE',
+  'AVOID NEW CAPITAL',
+]
+
+function stanceTone(stance) {
+  const s = String(stance).toUpperCase()
+  if (s.includes('ACCUMULATE')) return 'up'
+  if (s.includes('REDUCE') || s.includes('AVOID')) return 'down'
+  return 'flat'
+}
+
+const clip = (v, n = 320) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, n)
+const list = (v, n = 3, len = 300) => (Array.isArray(v) ? v.slice(0, n).map((x) => clip(typeof x === 'string' ? x : x?.t || x?.label || JSON.stringify(x), 120)).filter(Boolean).join(' | ').slice(0, len) : '')
+
+function digestAgents(a = {}) {
+  const out = []
+
+  const v = a.verdict
+  if (v && typeof v === 'object') {
+    out.push(`DEEP ANALYSIS — ${v.verdict || 'n/a'} at ${v.confidence ?? '?'}% conviction; bull ${v.bullScore ?? '?'} vs bear ${v.bearScore ?? '?'}.`)
+    if (v.summary) out.push(`  Read: ${clip(v.summary)}`)
+    const pillars = Object.entries(v.scores || {})
+      .map(([k, p]) => `${k} ${p?.score ?? '?'}/100`)
+      .join(', ')
+    if (pillars) out.push(`  Pillars: ${pillars}`)
+    const bull = list(v.bullReasons)
+    const bear = list(v.bearReasons)
+    if (bull) out.push(`  Strongest bull points: ${bull}`)
+    if (bear) out.push(`  Strongest bear points: ${bear}`)
+    if (v.finalThesis) out.push(`  Thesis: ${clip(v.finalThesis)}`)
+  }
+
+  const c = a.council
+  if (c?.judge) {
+    const j = c.judge
+    const pct = (x) => (Number.isFinite(Number(x)) ? Math.round(Number(x) * (Number(x) <= 1 ? 100 : 1)) : '?')
+    out.push(`COUNCIL RULING — ${j.verdict || 'n/a'} at ${j.confidence ?? '?'}% confidence; bull ${pct(j.bullScore)} vs bear ${pct(j.bearScore)} on evidentiary grounding.`)
+    if (j.text) out.push(`  Ruling: ${clip(j.text, 380)}`)
+  }
+
+  const n = a.narrative
+  if (n && typeof n === 'object') {
+    out.push(`NARRATIVE RADAR — ${n.voices_tracked ?? 0} voices tracked, ${n.bullish_voices ?? 0} bullish / ${n.bearish_voices ?? 0} bearish, convergence: ${n.convergence_status || 'n/a'}.`)
+    if (n.narrative_headline) out.push(`  Headline: ${clip(n.narrative_headline)}`)
+    if (n.sentiment_summary_text) out.push(`  Sentiment: ${clip(n.sentiment_summary_text)}`)
+  }
+
+  const r = a.risk
+  if (r && typeof r === 'object') {
+    const gates = (Array.isArray(r.signals) ? r.signals : [])
+      .map((s) => `${s?.label}: ${s?.pass ? 'pass' : 'fail'}`)
+      .join(', ')
+    out.push(`RISK DESK — ${r.qualified ? 'qualified' : 'NOT qualified'} under the user's limits. ${gates}`)
+    if (r.plan) out.push(`  Plan: entry ${r.plan.entry}, stop ${r.plan.stop}, target ${r.plan.target}, size $${r.plan.sizeUsd}.`)
+  }
+
+  const o = a.overview
+  if (o && typeof o === 'object') {
+    const regime = o.regime || o.market_regime || o.bias
+    if (regime || o.breadth || o.fearGreed !== undefined) {
+      out.push(`MARKET REGIME — ${clip(JSON.stringify({ regime, breadth: o.breadth, fearGreed: o.fearGreed, btc: o.btc, eth: o.eth }), 300)}`)
+    }
+  }
+
+  const s = a.sentiment
+  if (s && typeof s === 'object') {
+    out.push(`SENTIMENT SHIFT — ${clip(JSON.stringify(s.rotation || s.shifts || s, 300) || 'no shift data')}`)
+  }
+
+  return out
+}
+
+router.post('/final', async (req, res) => {
+  const start = Date.now()
+  const { symbol } = req.body
+  if (!symbol) return res.status(400).json({ error: 'symbol required' })
+
+  const limit = rateLimit('synthesis', 30, 60000)
+  if (!limit.allowed) {
+    log('POST', '/synthesis/final', 429, Date.now() - start)
+    return res.status(429).json({ error: 'Rate limit exceeded', retry_after: limit.retryAfter })
+  }
+
+  try {
+    const sym = symbol.toUpperCase()
+    const live = req.tokenIdentity || {}
+    const cacheKey = `synthesis:final:${(live.ca || sym).toLowerCase()}`
+    const cached = getCache(cacheKey)
+    if (cached) {
+      log('POST', '/synthesis/final', 200, Date.now() - start, '(cached)')
+      return res.json(cached)
+    }
+
+    const agents = req.body?.agents && typeof req.body.agents === 'object' ? req.body.agents : {}
+    const gathered = Object.keys(agents).filter((k) => agents[k] && typeof agents[k] === 'object')
+    const digest = digestAgents(agents)
+
+    // Fall back to whatever the other agents already warmed in cache.
+    if (!digest.length) {
+      const warm = {
+        verdict: getCache(`synthesis:verdict:${sym.toLowerCase()}`),
+        council: getCache(councilKey(req, 'synthesis:council')),
+        narrative: getCache(`synthesis:narrative:${sym.toLowerCase()}`),
+      }
+      digest.push(...digestAgents(warm))
+    }
+    if (!digest.length) throw new Error('No agent output available to synthesize yet')
+
+    const priceUsd = Number(live.priceUsd) || Number(agents.verdict?.priceUsd) || 0
+    const change24h = Number(live.change24h)
+    const name = live.name || agents.verdict?.name || agents.council?.name || sym
+
+    const prompt = `You are the MASTER DESK ANALYST — the senior crypto strategist who has read every other analyst's work and now delivers the house view on one token.
+
+TOKEN: ${name} (${sym})${live.ca ? ` — contract ${live.ca} on ${live.chainLabel || live.chain || 'resolved chain'}` : ''}
+LIVE PRICE: $${priceUsd}${Number.isFinite(change24h) ? ` (${change24h.toFixed(2)}% over 24h)` : ''}
+
+EVERY AGENT'S OUTPUT, VERBATIM:
+${digest.join('\n')}
+
+YOUR JOB: reconcile all of it into ONE professional recommendation. Where agents disagree, say so and explain which evidence you weight more and why.
+
+HARD RULES:
+- NEVER say "buy", "don't buy", "sell", "go long", "go short", "invest" or any direct instruction to transact. You are an analyst framing a stance, not a signal service.
+- Pick exactly ONE stance from: ${FINAL_STANCES.join(' / ')}.
+- Be concrete: cite the actual numbers the agents produced.
+- Never name data providers, APIs, tools or models behind any of this.
+- Write like a seasoned institutional strategist: calm, specific, no hype, no fear.
+
+Respond with ONLY one valid JSON object (no markdown, no fences):
+{
+  "stance": "<one of the allowed stances, uppercase>",
+  "conviction": <0-100>,
+  "headline": "<max 12 words, the one-line house view>",
+  "thesis": "<3-5 sentences reconciling every agent, naming the disagreement and your weighting>",
+  "keyPoints": [ {"t": "<one concrete point>", "w": "bull"|"bear"|"neutral"} ],
+  "agentDigests": [ {"agent": "<agent name>", "read": "<one sentence: what that agent concluded>", "weight": "high"|"medium"|"low"} ],
+  "risks": ["<specific risk>"],
+  "catalysts": ["<specific catalyst>"],
+  "levels": { "support": "<price or zone>", "resistance": "<price or zone>", "invalidation": "<what would break the stance>" },
+  "timeframe": "<the horizon this stance applies to>",
+  "sizeNote": "<one sentence on how a disciplined desk would frame exposure without telling anyone to transact>"
+}
+4-6 keyPoints, one agentDigest per agent that reported, 2-4 risks, 2-4 catalysts.`
+
+    let parsed = extractJson(await callLLM([
+      { role: 'system', content: 'You are a senior crypto desk strategist. You output ONLY one valid JSON object. No markdown, no code fences, no commentary, and never a direct instruction to buy or sell.' },
+      { role: 'user', content: prompt },
+    ], QWEN_MODELS.main, 1800, { timeoutMs: 50000 }).catch(() => ''))
+
+    if (!parsed) {
+      parsed = extractJson(await callLLM([
+        { role: 'system', content: 'You output ONLY valid JSON. No markdown, no code fences, no prose.' },
+        { role: 'user', content: prompt + '\n\nREMINDER: Return ONLY the JSON object with the exact keys specified.' },
+      ], QWEN_MODELS.main, 1500, { timeoutMs: 35000 }).catch(() => ''))
+    }
+    if (!parsed) throw new Error('Final synthesis did not return valid JSON')
+
+    const rawStance = String(parsed.stance || '').toUpperCase().trim()
+    const stance = FINAL_STANCES.find((s) => rawStance.includes(s.split(' ')[0])) || 'HOLD & MONITOR'
+
+    const data = {
+      symbol: sym,
+      name,
+      priceUsd: priceUsd || null,
+      change24h: Number.isFinite(change24h) ? change24h : null,
+      stance,
+      tone: stanceTone(stance),
+      conviction: clampScore(firstNum(parsed.conviction)),
+      headline: clip(parsed.headline, 160) || `${name}: the desk is in wait-and-weigh mode.`,
+      thesis: clip(parsed.thesis, 1400) || '',
+      keyPoints: firstArr(parsed.keyPoints).slice(0, 6).map((k) => ({
+        t: clip(typeof k === 'string' ? k : k?.t, 260),
+        w: ['bull', 'bear', 'neutral'].includes(String(k?.w || '').toLowerCase()) ? String(k.w).toLowerCase() : 'neutral',
+      })).filter((k) => k.t),
+      agentDigests: firstArr(parsed.agentDigests).slice(0, 8).map((d) => ({
+        agent: clip(typeof d === 'string' ? d : d?.agent, 40) || 'Desk agent',
+        read: clip(d?.read, 300),
+        weight: ['high', 'medium', 'low'].includes(String(d?.weight || '').toLowerCase()) ? String(d.weight).toLowerCase() : 'medium',
+      })).filter((d) => d.read),
+      risks: firstArr(parsed.risks).slice(0, 4).map((x) => clip(x, 220)).filter(Boolean),
+      catalysts: firstArr(parsed.catalysts).slice(0, 4).map((x) => clip(x, 220)).filter(Boolean),
+      levels: {
+        support: clip(parsed.levels?.support, 60) || '—',
+        resistance: clip(parsed.levels?.resistance, 60) || '—',
+        invalidation: clip(parsed.levels?.invalidation, 220) || '—',
+      },
+      timeframe: clip(parsed.timeframe, 80) || 'next 1-2 weeks',
+      sizeNote: clip(parsed.sizeNote, 400) || 'A disciplined desk frames exposure as a fraction of capital it can lose outright, sized against the invalidation level above.',
+      agentsUsed: gathered.length || digest.length,
+      asOf: new Date().toISOString(),
+    }
+
+    setCache(cacheKey, data, 10 * 60 * 1000)
+    log('POST', '/synthesis/final', 200, Date.now() - start)
+    res.json(data)
+  } catch (err) {
+    console.error('[FINAL ERROR]', err)
+    error('final', err)
+    res.status(500).json({ error: err.message })
   }
 })
 

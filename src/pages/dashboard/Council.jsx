@@ -10,19 +10,20 @@ import { motion } from 'framer-motion'
 import { buildReceipt, saveReceipt } from '../../data/receipts'
 import { fetchCouncil } from '../../lib/api'
 import { ErrorState } from '../../components/DashUI'
+import { BullMascot, BearMascot } from '../../components/CouncilMascots'
+import { CouncilLoader } from '../../components/ShadcnLoaders'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, AgentRow,
-  MicroLabel, LivePill, TONES,
+  MicroLabel, LivePill, ProgressMeter, TONES,
 } from '../../components/ConsoleUI'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// The real per-agent model selection — mirrors QWEN_MODELS in server/lib/llm.js,
-// which is what actually serves each advocate and the judge.
+// The council bench — three independent agents arguing the same tape.
 const AGENT_META = {
-  bull: { name: 'Bull advocate', desc: 'argues commitment', model: 'qwen3.6-flash', icon: TrendingUp, tone: 'up' },
-  bear: { name: 'Bear advocate', desc: 'argues restraint', model: 'qwen3.7-flash', icon: TrendingDown, tone: 'down' },
-  judge: { name: 'Judge', desc: 'rules on evidence, not vibes', model: 'qwen3.7-plus', icon: Gavel, tone: 'amber' },
+  bull: { name: 'Bull advocate', desc: 'argues commitment', icon: TrendingUp, tone: 'up' },
+  bear: { name: 'Bear advocate', desc: 'argues restraint', icon: TrendingDown, tone: 'down' },
+  judge: { name: 'Judge', desc: 'rules on evidence, not vibes', icon: Gavel, tone: 'amber' },
 }
 
 const VERDICT_TONE = { BUY: 'up', HOLD: 'amber', AVOID: 'down' }
@@ -45,9 +46,9 @@ function DebateCard({ role, text, thinking, round }) {
   const Icon = meta.icon
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
+      initial={{ opacity: 0, y: 18, scale: 0.92 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
       className="rounded-2xl border p-4"
       style={{ borderColor: `${color}33`, background: 'rgba(255,255,255,0.03)' }}
     >
@@ -62,9 +63,6 @@ function DebateCard({ role, text, thinking, round }) {
           <p className="text-[12.5px] font-semibold leading-none" style={{ color: '#f4f8ff' }}>{meta.name}</p>
           {round && <MicroLabel className="mt-1.5 block">{round}</MicroLabel>}
         </div>
-        <span className="cv-chip !py-0.5 font-mono !text-[10px]" title="model serving this agent">
-          {meta.model}
-        </span>
       </div>
       {thinking ? (
         <span className="typing-dots mt-3.5 inline-flex gap-1.5" style={{ color }}>
@@ -93,11 +91,11 @@ function CouncilLoading({ symbol }) {
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
       <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-          <span className="font-mono text-sm">the council is reading the evidence pack for {symbol}…</span>
+        <CouncilLoader label={`The council is reading the evidence pack for ${symbol}`} />
+        <div className="mt-6 w-full max-w-md">
+          <ProgressMeter label="Evidence → opening cases → cross-examination → ruling" tone="blue" />
         </div>
-        <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
+        <div className="mt-5 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
           {steps.map((s) => (
             <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
           ))}
@@ -131,7 +129,7 @@ export default function Council() {
       .then((d) => {
         if (!alive) return
         setData(d)
-        sleep(1000).then(() => {
+        sleep(350).then(() => {
           if (!alive) return
           setPhase('debating')
           ;(async () => {
@@ -139,14 +137,14 @@ export default function Council() {
             for (let i = 0; i < msgs.length; i++) {
               if (!alive) return
               setTyping(msgs[i].role)
-              await sleep(900)
+              await sleep(400)
               if (!alive) return
               setTyping(null)
               setVisible(i + 1)
-              await sleep(1000)
+              await sleep(400)
             }
             if (!alive) return
-            await sleep(500)
+            await sleep(250)
             if (alive) setPhase('judged')
           })()
         })
@@ -166,8 +164,6 @@ export default function Council() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [visible, typing, phase])
-
-  const pick = (t) => setSearchParams({ token: t })
 
   if (!token) {
     return (
@@ -242,6 +238,35 @@ export default function Council() {
         <button onClick={() => setRunKey((k) => k + 1)} className="cv-chip">
           <RefreshCw size={12} /> Re-open session
         </button>
+      </motion.div>
+
+      {/* ── the arena: bull vs bear face-off, hyped while they speak ── */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 22, delay: 0.05 }}
+        className="cv-panel flex items-center justify-between gap-4 px-5 py-4"
+      >
+        <div className="flex items-center gap-3">
+          <BullMascot size={44} hype={typing === 'bull' || (judged && judge?.verdict === 'BUY')} />
+          <div>
+            <p className="text-[12.5px] font-bold leading-none" style={{ color: TONES.up }}>BULL</p>
+            <MicroLabel className="mt-1.5 block">argues commitment</MicroLabel>
+          </div>
+        </div>
+        <div className="flex flex-col items-center">
+          <Gavel size={17} className="mb-1" style={{ color: TONES.amber }} />
+          <span className="font-mono text-[9px] tracking-[0.22em]" style={{ color: '#66739a' }}>
+            {judged ? 'RULED' : 'IN SESSION'}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-right">
+          <div>
+            <p className="text-[12.5px] font-bold leading-none" style={{ color: TONES.down }}>BEAR</p>
+            <MicroLabel className="mt-1.5 block">argues restraint</MicroLabel>
+          </div>
+          <BearMascot size={44} hype={typing === 'bear' || (judged && judge?.verdict === 'AVOID')} />
+        </div>
       </motion.div>
 
       {/* ── the answer, first ── */}
@@ -320,6 +345,7 @@ export default function Council() {
               {saved ? <Check size={12} /> : <Receipt size={12} />} {saved ? 'Receipt saved' : 'Save receipt'}
             </button>
             <Link to={`/dashboard/risk?token=${data.symbol}`} className="cv-chip"><ShieldAlert size={12} /> Risk Desk</Link>
+            <Link to={`/dashboard/final?token=${data.symbol}`} className="cv-chip"><Scale size={12} /> Final Verdict</Link>
             <Link to={`/dashboard/studio/image?token=${data.symbol}`} className="cv-chip"><ImageIcon size={12} /> Studio</Link>
           </div>
         </PanelV2>
@@ -332,7 +358,7 @@ export default function Council() {
         </PanelV2>
       )}
 
-      {/* ── transcript: every argument as its own card ── */}
+      {/* ── transcript: every argument pops in as its own card ── */}
       <PanelV2
         icon={Swords}
         title="Debate Transcript"
@@ -347,8 +373,8 @@ export default function Council() {
         </div>
       </PanelV2>
 
-      {/* ── the bench: who argued, and on which model ── */}
-      <PanelV2 icon={Scale} title="The Bench" right={<MicroLabel>per-agent models</MicroLabel>} delay={0.3}>
+      {/* ── the bench: who argued ── */}
+      <PanelV2 icon={Scale} title="The Bench" right={<MicroLabel>independent agents</MicroLabel>} delay={0.3}>
         <div className="grid gap-1 sm:grid-cols-3">
           {['bull', 'bear', 'judge'].map((role) => {
             const meta = AGENT_META[role]
@@ -358,7 +384,7 @@ export default function Council() {
                 key={role}
                 icon={meta.icon}
                 name={meta.name}
-                desc={`${meta.desc} · ${meta.model}`}
+                desc={meta.desc}
                 state={active ? 'active' : 'ready'}
                 tone={meta.tone}
               />

@@ -19,6 +19,7 @@ import ImageStudio from './pages/dashboard/ImageStudio'
 import VideoStudio from './pages/dashboard/VideoStudio'
 import VoiceStudio from './pages/dashboard/VoiceStudio'
 import RiskDesk from './pages/dashboard/RiskDesk'
+import FinalVerdict from './pages/dashboard/FinalVerdict'
 import HistoryPage from './pages/dashboard/HistoryPage'
 
 // Marketing pages keep the navbar / footer chrome.
@@ -53,6 +54,7 @@ function DashboardArea() {
         <Route path="studio/video" element={<VideoStudio />} />
         <Route path="studio/voice" element={<VoiceStudio />} />
         <Route path="risk" element={<RiskDesk />} />
+        <Route path="final" element={<FinalVerdict />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

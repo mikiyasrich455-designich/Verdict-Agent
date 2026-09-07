@@ -1,25 +1,20 @@
 // Data hook shared by every agent dashboard.
 // Shows a YouTube-style skeleton while "switching dashboards",
-// then resolves the simulated feed. Swap the fetcher for a real
-// endpoint later without touching any page.
+// then resolves the live feed the instant it arrives — no artificial
+// delay. Repeat visits are served from the client cache in lib/api.js.
 import { useEffect, useRef, useState } from 'react'
 
-export function useAgentData(fetcher, deps = [], minDelay = 520) {
+export function useAgentData(fetcher, deps = []) {
   const [state, setState] = useState({ status: 'loading', data: null, error: null })
   const alive = useRef(true)
 
   useEffect(() => {
     alive.current = true
     setState((s) => ({ ...s, status: 'loading' }))
-    const started = Date.now()
 
     Promise.resolve(fetcher())
       .then((data) => {
-        const elapsed = Date.now() - started
-        const rest = Math.max(0, minDelay - elapsed)
-        setTimeout(() => {
-          if (alive.current) setState({ status: 'ready', data, error: null })
-        }, rest)
+        if (alive.current) setState({ status: 'ready', data, error: null })
       })
       .catch((error) => {
         if (alive.current) setState({ status: 'error', data: null, error })

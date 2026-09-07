@@ -121,7 +121,7 @@ export default function CautionPage({ onAccept }) {
         </div>
 
         <p className="text-center text-[11px] text-faint mt-6 font-mono">
-          educational demo · built for the RYO-CHAN hackathon 2026
+          educational demo · built for the hackathon 2026
         </p>
       </motion.div>
     </div>

@@ -9,9 +9,11 @@ const QWEN_NATIVE = QWEN_BASE.replace(/\/compatible-mode\/v1\/?$/, '')
 const QWEN_KEY = process.env.QWEN_KEY || ''
 
 export const QWEN_MODELS = {
-  // Top agent — research, deep analysis, verdicts, compare, insights, council.
+  // Top agent — headline verdicts, compare, and the final recommendation.
   main: process.env.QWEN_MAIN_MODEL || 'qwen3.8-max',
   chat: process.env.QWEN_CHAT_MODEL || 'qwen3.8-flash',
+  // Reasoning workhorse — deep analysis and insight upgrades. Cheap, fast, strong.
+  reason: process.env.QWEN_REASON_MODEL || 'qwen3.7-plus',
   // Grounded web search needs a model that accepts enable_search.
   search: process.env.QWEN_SEARCH_MODEL || 'qwen3.8-flash',
   // Voiceover/script writing — a fast model, not the deep reasoning agent.
@@ -22,7 +24,6 @@ export const QWEN_MODELS = {
   judge: process.env.QWEN_JUDGE_MODEL || 'qwen3.7-plus',
   // Studio media — exact Qwen Cloud models confirmed on this account.
   image: process.env.QWEN_IMAGE_MODEL || 'qwen-image-plus',
-  video: process.env.QWEN_VIDEO_MODEL || 'wan2.1-t2v-turbo',
   voice: process.env.QWEN_VOICE_MODEL || 'qwen3-tts-flash',
   ttsVoice: process.env.QWEN_TTS_VOICE || 'Ethan',
 }
@@ -45,8 +46,8 @@ export function extractJsonLite(text) {
 }
 
 // Chat completion via Qwen. Never falls back — a failure is a real error.
-// opts.timeoutMs lets fast paths (council, search) cut a slow call short instead of
-// sitting on the 120s ceiling.
+// opts.timeoutMs lets fast paths (council, search) cut a slow call short; the
+// default ceiling is 60s so a hung model can never stall a page for minutes.
 export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 2000, opts = {}) {
   requireKey()
   const body = { model, messages, max_tokens: maxTokens, temperature: opts.temperature ?? 0.4 }
@@ -57,7 +58,7 @@ export async function callLLM(messages, model = QWEN_MODELS.main, maxTokens = 20
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${QWEN_KEY}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Number(opts.timeoutMs) || 120000),
+    signal: AbortSignal.timeout(Number(opts.timeoutMs) || 60000),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -117,49 +118,6 @@ export async function qwenImage(prompt, size = '1024*1024') {
     if (out.task_status === 'FAILED') throw new Error(`Qwen image failed: ${data.message || out.message || 'task failed'}`)
   }
   throw new Error('Qwen image timed out')
-}
-
-// Video generation — native async task flow (submit, then poll from the browser).
-export async function qwenVideoSubmit(prompt, duration = 5) {
-  requireKey()
-  const res = await fetch(`${QWEN_NATIVE}/api/v1/services/aigc/video-generation/video-synthesis`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${QWEN_KEY}`,
-      'X-DashScope-Async': 'enable',
-    },
-    body: JSON.stringify({
-      model: QWEN_MODELS.video,
-      input: { prompt },
-      // wan2.1-t2v-turbo produces a 720p ~5s clip; other durations are rejected.
-      parameters: { size: '1280*720', duration: 5, prompt_extend: true },
-    }),
-    signal: AbortSignal.timeout(30000),
-  })
-  if (!res.ok) throw new Error(`Qwen video submit failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
-  const data = await res.json()
-  const taskId = data.output?.task_id
-  if (!taskId) throw new Error('Qwen video: no task_id in response')
-  return taskId
-}
-
-export async function qwenVideoPoll(taskId) {
-  requireKey()
-  const res = await fetch(`${QWEN_NATIVE}/api/v1/tasks/${taskId}`, {
-    headers: { Authorization: `Bearer ${QWEN_KEY}` },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) return { httpStatus: res.status, status: 'unknown' }
-  const data = await res.json()
-  const out = data.output || {}
-  const status = String(out.task_status || 'RUNNING').toLowerCase()
-  if (status === 'succeeded') {
-    const videoUrl = out.video_url || out.results?.[0]?.url || null
-    return { status, videoUrl, posterUrl: out.cover_url || null, failed: !videoUrl, message: videoUrl ? '' : 'no video url in result' }
-  }
-  const failed = ['failed', 'canceled', 'unknown'].includes(status)
-  return { status, videoUrl: null, posterUrl: null, failed, message: failed ? (data.message || out.message || status) : '' }
 }
 
 // Voice (TTS) via the native DashScope multimodal-generation endpoint. Returns a durable

@@ -12,7 +12,7 @@ import { fetchVerdict } from '../../lib/api'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
-  MicroLabel, TONES,
+  MicroLabel, ProgressMeter, TONES,
 } from '../../components/ConsoleUI'
 
 const PILLAR_LABELS = {
@@ -78,6 +78,9 @@ function RunningFlow({ symbol }) {
       <p className="mt-4 font-mono text-[11px] tracking-[0.14em]" style={{ color: '#66739a' }}>
         GATHERING LIVE MARKET DATA · AI REASONING
       </p>
+      <div className="mt-5 w-full max-w-md">
+        <ProgressMeter value={null} label="deep-scanning" tone="blue" />
+      </div>
       <div className="mt-5 grid w-full gap-2 sm:grid-cols-2">
         {[0, 1].map((i) => <div key={i} className="cv-ghost h-[56px]" />)}
       </div>

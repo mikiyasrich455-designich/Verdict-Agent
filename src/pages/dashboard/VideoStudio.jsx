@@ -116,7 +116,7 @@ function VideoStudioInner({ token, pick }) {
             <div className="flex flex-wrap gap-2">
               <span className="glass-chip"><Film size={11} /> 25s · 2 shots</span>
               <span className="glass-chip">720p · 16:9</span>
-              <span className="glass-chip">Grok Imagine</span>
+              <span className="glass-chip">AI Cinema Engine</span>
             </div>
             <div className="pt-2 border-t border-white/5">
               <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>

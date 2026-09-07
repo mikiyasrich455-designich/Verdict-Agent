@@ -50,6 +50,7 @@ async function callRyoTool(toolName, body = {}) {
         'Authorization': `Bearer ${process.env.RYO_MCP_KEY}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20000),
     })
   } catch (fetchErr) {
     console.error(`[RYO] Fetch error for ${toolName}:`, fetchErr.message)
@@ -486,16 +487,15 @@ router.post('/risk', async (req, res) => {
   }
 
   try {
-    const cacheKey = idKey(req, 'ryo:risk')
-    const cached = getCache(cacheKey)
-    if (cached) {
-      log('POST', '/ryo/risk', 200, Date.now() - start, '(cached)')
-      return res.json(cached)
+    // Cache the RAW upstream payload only — `limits` change on every slider move, so the
+    // shaped result must be re-normalized per request instead of served from a stale key.
+    const cacheKey = idKey(req, 'ryo:risk:raw')
+    let raw = getCache(cacheKey)
+    if (!raw) {
+      raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
+      setCache(cacheKey, raw, 5 * 60 * 1000)
     }
-
-    const raw = await callRyoTool('analyze_token', { symbol: symbol.toUpperCase() })
     const data = withLiveIdentity(normalizeRiskDesk(raw, limits, req.tokenIdentity), req.tokenIdentity)
-    setCache(cacheKey, data, 5 * 60 * 1000)
     log('POST', '/ryo/risk', 200, Date.now() - start)
     res.json(data)
   } catch (err) {

@@ -59,194 +59,110 @@ export const ANALYSIS_STEPS = [
   'Building the verdict…',
 ]
 
-// POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + RYO + Qwen)
-// Backend now parallelizes RYO + 3x SERP queries (was sequential = 9-15s)
-export async function fetchVerdict(symbol, onStep) {
-  try {
-    const res = await fetch('/api/proxy/synthesis/verdict', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(withIdentity({ symbol })),
-    })
+// ── Speed layer: client cache + in-flight dedupe ────────────────────────────
+// Re-visiting a dashboard renders instantly instead of re-running the whole
+// agent chain, and two pages asking for the same feed share ONE network call.
+// TTLs stay under the server's own cache windows so this never shows staler
+// data than the backend would have. body === null → GET.
+const cacheStore = new Map()
+const inflight = new Map()
 
+function request(path, body, { ttl = 90000, label = 'Request' } = {}) {
+  const isGet = body === null
+  const key = isGet ? path : `${path}::${JSON.stringify(body || {})}`
+  const hit = cacheStore.get(key)
+  if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value)
+  if (inflight.has(key)) return inflight.get(key)
+
+  const p = (async () => {
+    const res = await fetch(path, isGet
+      ? undefined
+      : {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        })
     if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.error || 'Verdict failed')
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || `${label} failed`)
     }
+    const value = await res.json()
+    cacheStore.set(key, { at: Date.now(), value })
+    return value
+  })().finally(() => inflight.delete(key))
 
-    return res.json()
-  } catch (err) {
-    throw err
-  }
+  inflight.set(key, p)
+  return p
 }
 
-// POST /api/proxy/synthesis/debate → RYO analyze → debate shape
-export async function fetchDebate(symbol) {
-  const res = await fetch('/api/proxy/synthesis/debate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol })),
-  })
+// POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + live data)
+export function fetchVerdict(symbol) {
+  return request('/api/proxy/synthesis/verdict', withIdentity({ symbol }), { ttl: 240000, label: 'Verdict' })
+}
 
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Debate failed')
-  }
-
-  return res.json()
+// POST /api/proxy/synthesis/debate → analyze → debate shape
+export function fetchDebate(symbol) {
+  return request('/api/proxy/synthesis/debate', withIdentity({ symbol }), { ttl: 90000, label: 'Debate' })
 }
 
 // POST /api/proxy/synthesis/council → evidence-grounded Bull vs Bear vs Judge
-export async function fetchCouncil(symbol) {
-  const res = await fetch('/api/proxy/synthesis/council', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol })),
-  })
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || 'Council failed')
-  }
-
-  return res.json()
+export function fetchCouncil(symbol) {
+  return request('/api/proxy/synthesis/council', withIdentity({ symbol }), { ttl: 240000, label: 'Council' })
 }
 
 // POST /api/proxy/ryo/market_overview → normalized overview shape
-export async function fetchMarketOverview() {
-  const res = await fetch('/api/proxy/ryo/market_overview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Market overview failed')
-  }
-
-  return res.json()
+export function fetchMarketOverview() {
+  return request('/api/proxy/ryo/market_overview', {}, { ttl: 60000, label: 'Market overview' })
 }
 
-// GET /api/proxy/ryo/majors → real CMC quotes for the console quick-start tiles
-export async function fetchMajors() {
-  const res = await fetch('/api/proxy/ryo/majors')
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || 'Major quotes failed')
-  }
-  return res.json()
+// GET /api/proxy/ryo/majors → real live quotes for the console quick-start tiles
+export function fetchMajors() {
+  return request('/api/proxy/ryo/majors', null, { ttl: 30000, label: 'Major quotes' })
 }
 
 // POST /api/proxy/ryo/scan_market → normalized scan array
-export async function fetchScan() {
-  const res = await fetch('/api/proxy/ryo/scan_market', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Scan failed')
-  }
-
-  return res.json()
+export function fetchScan() {
+  return request('/api/proxy/ryo/scan_market', {}, { ttl: 60000, label: 'Scan' })
 }
 
 // POST /api/proxy/ryo/analyze_token → normalized profile shape
 // `identity` ({ca, chain, name}) pins the lookup to one contract when the page
 // already knows it — otherwise the stored active token is used.
 export async function fetchTokenProfile(symbol, identity) {
-  const res = await fetch('/api/proxy/ryo/analyze_token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol }, identity)),
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Token profile failed')
-  }
-
-  return enrichProfile(await res.json())
+  const data = await request('/api/proxy/ryo/analyze_token', withIdentity({ symbol }, identity), { ttl: 60000, label: 'Token profile' })
+  return enrichProfile(data)
 }
 
 // POST /api/proxy/ryo/compare_tokens → normalized compare array
-export async function fetchCompare(symbols) {
-  const res = await fetch('/api/proxy/ryo/compare_tokens', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbols }),
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Compare failed')
-  }
-
-  return res.json()
+export function fetchCompare(symbols) {
+  return request('/api/proxy/ryo/compare_tokens', { symbols }, { ttl: 60000, label: 'Compare' })
 }
 
 // POST /api/proxy/ryo/sentiment_shift → normalized sentiment shape
-export async function fetchSentimentShift() {
-  const res = await fetch('/api/proxy/ryo/sentiment_shift', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Sentiment shift failed')
-  }
-
-  return res.json()
+export function fetchSentimentShift() {
+  return request('/api/proxy/ryo/sentiment_shift', {}, { ttl: 90000, label: 'Sentiment shift' })
 }
 
 // POST /api/proxy/synthesis/narrative → normalized narrative shape
-export async function fetchNarrative(symbol) {
-  const res = await fetch('/api/proxy/synthesis/narrative', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol })),
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Narrative failed')
-  }
-
-  return res.json()
+export function fetchNarrative(symbol) {
+  return request('/api/proxy/synthesis/narrative', withIdentity({ symbol }), { ttl: 120000, label: 'Narrative' })
 }
 
 // POST /api/proxy/synthesis/risk → normalized risk desk shape
-export async function fetchRiskDesk(symbol, limits) {
-  const res = await fetch('/api/proxy/synthesis/risk', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol, limits })),
-  })
-
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Risk desk failed')
-  }
-
-  return res.json()
+export function fetchRiskDesk(symbol, limits) {
+  return request('/api/proxy/synthesis/risk', withIdentity({ symbol, limits }), { ttl: 45000, label: 'Risk desk' })
 }
 
 // POST /api/proxy/synthesis/script → normalized studio script shape
-export async function fetchStudioScript(symbol) {
-  const res = await fetch('/api/proxy/synthesis/script', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(withIdentity({ symbol })),
-  })
+export function fetchStudioScript(symbol) {
+  return request('/api/proxy/synthesis/script', withIdentity({ symbol }), { ttl: 240000, label: 'Studio script' })
+}
 
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || 'Studio script failed')
-  }
-
-  return res.json()
+// POST /api/proxy/synthesis/final → master desk pass over every other agent's output.
+// The client gathers the agents itself (so the UI can track each one), then hands
+// the payloads over — the server never re-fetches, it just reconciles.
+export function fetchFinal(symbol, agents) {
+  return request('/api/proxy/synthesis/final', withIdentity({ symbol, agents }), { ttl: 600000, label: 'Final recommendation' })
 }
 
 // POST /api/proxy/studio/image → Qwen image (wan2.7-image). The prompt is built
