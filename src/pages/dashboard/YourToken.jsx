@@ -13,6 +13,7 @@ import { resolveTokenInput } from '../../components/DashboardShell'
 import { setActiveToken, getActiveToken, identityFromParams, tokenHref } from '../../lib/activeToken'
 import { fetchMajors } from '../../lib/api'
 import { STUDIO_COVER } from './StudioShared'
+import BookLoader from '../../components/loaders/BookLoader'
 
 const CHIPS = [
   { icon: BarChart3, label: 'Market', to: '/dashboard/overview' },
@@ -123,7 +124,12 @@ export default function YourToken() {
         </div>
       </motion.section>
 
-      {/* ── quick start: real live majors ── */}
+      {resolving ? (
+        <div className="flex min-h-[46vh] items-center justify-center">
+          <BookLoader />
+        </div>
+      ) : (
+        <>
       <PanelV2
         icon={Zap}
         delay={0.08}
@@ -222,6 +228,8 @@ export default function YourToken() {
           })}
         </div>
       </PanelV2>
+        </>
+      )}
     </div>
   )
 }

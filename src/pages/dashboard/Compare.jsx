@@ -10,6 +10,7 @@ import {
   PanelV2, StatTile, AnswerBanner, InsightRow, TokenLogo, MicroLabel, TONES,
 } from '../../components/ConsoleUI'
 import { fmtUsd, fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
+import BookLoader from '../../components/loaders/BookLoader'
 
 const MAX = 3
 const PILLARS = ['technical', 'market', 'risk', 'catalyst', 'sentiment']
@@ -50,30 +51,10 @@ function StancePill({ label, tone }) {
   )
 }
 
-function Loading({ symbols }) {
+function Loading() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="cv-panel cv-ghost h-[118px]" />
-      <div className="cv-grid-stats">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
-      </div>
-      <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-          <span className="font-mono text-sm">comparing evidence packs…</span>
-        </div>
-        {symbols.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {symbols.map((s, i) => (
-              <span key={`${s}-${i}`} className="cv-chip font-mono">{s.toUpperCase()}</span>
-            ))}
-          </div>
-        )}
-        <p className="mt-4 font-mono text-[10px] tracking-[0.2em]" style={{ color: '#66739a' }}>
-          LIVE MARKET + AI REASONING
-        </p>
-      </div>
-      <div className="cv-panel cv-ghost h-[240px]" />
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }

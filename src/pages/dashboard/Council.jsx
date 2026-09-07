@@ -14,6 +14,7 @@ import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import { BullMascot, BearMascot } from '../../components/CouncilMascots'
 import { CouncilLoader } from '../../components/ShadcnLoaders'
+import CandleLoader from '../../components/loaders/CandleLoader'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, AgentRow,
   MicroLabel, LivePill, ProgressMeter, TONES,
@@ -80,31 +81,15 @@ function DebateCard({ role, text, thinking, round }) {
   )
 }
 
-function CouncilLoading({ symbol }) {
-  const steps = [
-    'Reading the evidence pack',
-    'Round 1 · Opening cases — positivity vs risk',
-    'Round 2 · Cross-examination of both openings',
-    'Round 3 · Rebuttals — concede or refute with numbers',
-    'Round 4 · Closing statements after full scrutiny',
-    'Judge weighing grounding, not vibes',
-  ]
+function CouncilLoading() {
   return (
     <div className="flex flex-col gap-4">
       <div className="cv-panel cv-ghost h-[112px]" />
       <div className="cv-grid-stats">
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
-      <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <CouncilLoader label={`The council is reading the evidence pack for ${symbol}`} />
-        <div className="mt-6 w-full max-w-md">
-          <ProgressMeter label="Evidence → openings → cross-exams → rebuttals → closings → ruling" tone="blue" />
-        </div>
-        <div className="mt-5 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
-          {steps.map((s) => (
-            <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
-          ))}
-        </div>
+      <div className="cv-panel flex min-h-[46vh] flex-col items-center justify-center px-6 py-9">
+        <CandleLoader />
       </div>
     </div>
   )

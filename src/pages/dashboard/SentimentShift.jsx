@@ -9,6 +9,7 @@ import {
   MicroLabel, LivePill, TONES,
 } from '../../components/ConsoleUI'
 import { ErrorState } from '../../components/DashUI'
+import BookLoader from '../../components/loaders/BookLoader'
 
 const DIR_META = {
   'risk-on rotation': { icon: TrendingUp, cls: 'text-success', note: 'Confidence is rotating in. Momentum playbooks get the green light, but watch for crowded positioning near the top of the drift.' },
@@ -95,21 +96,8 @@ function SentimentChart({ series, tone }) {
 
 function Loading() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="cv-panel cv-ghost h-[118px]" />
-      <div className="cv-grid-stats">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
-      </div>
-      <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-          <span className="font-mono text-sm">reading the crowd…</span>
-        </div>
-        <p className="mt-4 font-mono text-[10px] tracking-[0.2em]" style={{ color: '#66739a' }}>
-          LIVE SENTIMENT + 7-DAY DRIFT
-        </p>
-      </div>
-      <div className="cv-panel cv-ghost h-[240px]" />
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }

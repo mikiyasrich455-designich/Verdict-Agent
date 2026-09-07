@@ -11,6 +11,7 @@ import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
 import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
+import CandleLoader from '../../components/loaders/CandleLoader'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, LivePill, ProgressMeter, TONES,
@@ -167,31 +168,14 @@ function convergenceTone(status) {
 }
 
 function Loading() {
-  const steps = [
-    'Searching X, YouTube & Reddit for voices',
-    'Reading each post\'s stance',
-    'Counting bullish vs bearish conviction',
-    'Stamping news against on-chain evidence',
-  ]
   return (
     <div className="flex flex-col gap-4">
       <div className="cv-panel cv-ghost h-[112px]" />
       <div className="cv-grid-stats">
         {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
       </div>
-      <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-          <span className="font-mono text-sm">sweeping the loudest voices…</span>
-        </div>
-        <div className="mt-4 w-full max-w-md">
-          <ProgressMeter value={null} label="sweeping voices" tone="violet" />
-        </div>
-        <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
-          {steps.map((s) => (
-            <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
-          ))}
-        </div>
+      <div className="cv-panel flex min-h-[46vh] flex-col items-center justify-center px-6 py-9">
+        <CandleLoader />
       </div>
     </div>
   )

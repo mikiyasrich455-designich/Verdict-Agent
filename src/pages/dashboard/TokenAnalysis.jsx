@@ -19,6 +19,7 @@ import {
   TokenLogo, MicroLabel, TONES,
 } from '../../components/ConsoleUI'
 import { ErrorState, fmtUsd, fmtPrice, fmtPct, fmtNum } from '../../components/DashUI'
+import BookLoader from '../../components/loaders/BookLoader'
 
 function CopyChip({ value }) {
   const [done, setDone] = useState(false)
@@ -209,24 +210,9 @@ function sanitizeProfile(d) {
 }
 
 function Loading() {
-  const steps = ['Reading the contract', 'Matching the network', 'Pulling price, cap & volume', 'Collecting logo, links & description']
   return (
-    <div className="flex flex-col gap-4">
-      <div className="cv-panel cv-ghost h-[132px]" />
-      <div className="cv-grid-stats">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
-      </div>
-      <div className="cv-panel flex flex-col items-center px-6 py-9">
-        <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-          <span className="font-mono text-sm">resolving token from live markets…</span>
-        </div>
-        <div className="mt-4 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
-          {steps.map((s) => (
-            <p key={s} className="font-mono text-[11.5px]" style={{ color: '#66739a' }}>{s}…</p>
-          ))}
-        </div>
-      </div>
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }

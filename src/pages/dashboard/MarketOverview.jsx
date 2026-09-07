@@ -10,6 +10,7 @@ import {
 } from '../../components/ConsoleUI'
 import { getStoredToken } from '../../components/DashboardShell'
 import { stanceOf } from '../../lib/stance'
+import BookLoader from '../../components/loaders/BookLoader'
 
 const REGIME_TONE = { 'risk-on': 'up', neutral: 'amber', 'risk-off': 'down' }
 // Stance tone → ConsoleUI tone bridge: POSITIVE reads teal-up, NEUTRAL amber, CAUTION red-down.
@@ -29,21 +30,8 @@ function StancePill({ label, tone }) {
 
 function MarketSkeleton() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="cv-panel cv-ghost h-[132px]" />
-      <div className="cv-grid-stats">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
-      </div>
-      <div className="cv-grid-2">
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="cv-panel cv-ghost h-[220px]" />
-          <div className="cv-panel cv-ghost h-[260px]" />
-        </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="cv-panel cv-ghost h-[180px]" />
-          <div className="cv-panel cv-ghost h-[180px]" />
-        </div>
-      </div>
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }

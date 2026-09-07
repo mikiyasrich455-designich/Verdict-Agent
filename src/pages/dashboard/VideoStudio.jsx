@@ -1,14 +1,15 @@
-// Studio · Video — a 25s cinematic news package from two Grok Imagine shots (15s + 10s) played back-to-back
-import { useState } from 'react'
-import { Video, Clapperboard, RefreshCw, Film } from 'lucide-react'
+// Studio · Video — a 25s cinematic news package from two shots (15s + 10s) played back-to-back
+import { useRef, useState } from 'react'
+import { Video, RefreshCw, Play, Pause, Download, Sparkles, Clock } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import VerdictBadge from '../../components/VerdictBadge'
 import { useAgentData } from '../../hooks/useAgentData'
 import { fetchStudioScript, generateStudioVideo } from '../../lib/api'
-import { PageHeader, Panel, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
-import { OrbitLoader, PageSkeleton } from '../../components/Loaders'
-import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, DownloadBtn, STUDIO_COVER, coverFor } from './StudioShared'
+import { PageHeader, EmptyState, ErrorState, friendlyError } from '../../components/DashUI'
+import GenLoader from '../../components/loaders/GenLoader'
+import CandleLoader from '../../components/loaders/CandleLoader'
+import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, coverFor } from './StudioShared'
 
 export default function VideoStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -23,13 +24,25 @@ function VideoStudioInner({ token, pick }) {
   const [phase, setPhase] = useState('idle') // idle | generating | done
   const [error, setError] = useState(null)
   const [output, setOutput] = useState(null)
-  const [stage, setStage] = useState('')
   const [clipIndex, setClipIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const videoRef = useRef(null)
+
+  const header = (
+    <PageHeader
+      icon={Video}
+      title={script ? `Studio · Video · ${script.symbol}` : 'Studio · Video'}
+      subtitle="Turn a verdict into a short motion clip."
+      source={{ mode: 'live', name: 'AI video' }}
+    >
+      {script && <VerdictBadge verdict={script.verdict} size="sm" animate={false} />}
+    </PageHeader>
+  )
 
   if (!token) {
     return (
       <>
-        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
+        {header}
         <EmptyState
           icon={Video}
           title="Set a token first"
@@ -43,7 +56,7 @@ function VideoStudioInner({ token, pick }) {
   if (status === 'error') {
     return (
       <>
-        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
+        {header}
         <ErrorState error={fetchError} onRetry={() => window.location.reload()}>
           <p className="text-[11px] text-faint font-mono">Script fetch failed — the analysis may be rate-limited.</p>
         </ErrorState>
@@ -54,8 +67,10 @@ function VideoStudioInner({ token, pick }) {
   if (status !== 'ready' || !script) {
     return (
       <>
-        <PageHeader icon={Video} title="Studio · Video" subtitle="Turn a verdict into a short motion clip." source={{ mode: 'live', name: 'AI video' }} />
-        <PageSkeleton />
+        {header}
+        <div className="min-h-[46vh] flex items-center justify-center">
+          <CandleLoader />
+        </div>
       </>
     )
   }
@@ -65,9 +80,9 @@ function VideoStudioInner({ token, pick }) {
     setError(null)
     setOutput(null)
     setClipIndex(0)
-    setStage('Starting render…')
+    setPlaying(false)
     try {
-      const res = await generateStudioVideo(script, setStage)
+      const res = await generateStudioVideo(script)
       const entry = {
         symbol: script.symbol,
         verdict: script.verdict,
@@ -88,123 +103,118 @@ function VideoStudioInner({ token, pick }) {
     }
   }
 
-  // The 25s package arrives as two Grok shots played back-to-back; the local
+  // The 25s package arrives as two shots played back-to-back; the local
   // motion-card fallback is a single clip, so normalise both into one list.
   const clips = output?.clips?.length ? output.clips : output?.videoUrl ? [output.videoUrl] : []
   const shot = clips.length ? clips[Math.min(clipIndex, clips.length - 1)] : null
   const shotName = clips.length > 1 ? `shot${clipIndex + 1}-` : 'clip-'
 
+  const togglePlay = () => {
+    const v = videoRef.current
+    if (!v) return
+    if (v.paused) v.play().catch(() => {})
+    else v.pause()
+  }
+
+  const saveClip = () => {
+    if (!output) return
+    downloadDataUrl(shot || output.poster, `verdict-${output.symbol.toLowerCase()}-${shotName}${output.format || 'mp4'}`)
+  }
+
   return (
     <>
-      <PageHeader
-        icon={Video}
-        title={`Studio · Video · ${script.symbol}`}
-        subtitle="Turn a verdict into a short motion clip."
-        source={{ mode: 'live', name: 'AI video' }}
-      >
-        <VerdictBadge verdict={script.verdict} size="sm" animate={false} />
-      </PageHeader>
+      {header}
 
-      <div className="grid lg:grid-cols-5 gap-4">
-        {/* video brief — prompt is generated behind the scenes, never shown here */}
-        <Panel title="Video Brief" icon={Clapperboard} delay={0.08} className="lg:col-span-2">
-          <div className="space-y-4">
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint mb-1.5">Concept</p>
-              <p className="text-[12.5px] text-snow/80 leading-relaxed break-words">Realistic female news anchor at a clean broadcast desk delivering the verdict, straight to camera — two cinematic shots cut into one continuous package</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="glass-chip"><Film size={11} /> 25s · 2 shots</span>
-              <span className="glass-chip">720p · 16:9</span>
-              <span className="glass-chip">AI Cinema Engine</span>
-            </div>
-            <div className="pt-2 border-t border-white/5">
-              <p className="text-[10px] font-mono text-faint mb-2">CONFIDENCE · {script.confidence}/100</p>
-              <button onClick={generate} disabled={phase === 'generating'} className="glass-btn w-full justify-center !py-3">
-                <Clapperboard size={14} /> {phase === 'generating' ? 'Generating…' : output ? 'Regenerate Clip' : 'Generate Clip'}
-              </button>
-            </div>
-          </div>
-        </Panel>
-
-        {/* screen */}
-        <div className="lg:col-span-3">
-          <div className="studio-frame studio-vignette min-h-[320px] flex items-center justify-center">
-            <AnimatePresence mode="wait">
-              {phase === 'generating' && (
-                <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-[320px] flex flex-col items-center justify-center gap-4">
-                  <OrbitLoader label="Generating video…" />
-                  <p className="font-mono text-[11px] text-accent/80">{stage || 'Please wait…'}</p>
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-faint">AI VIDEO RENDER · 2 SHOTS IN PARALLEL · UP TO 3-4 MINUTES</p>
-                </motion.div>
-              )}
-              {phase === 'done' && output && (
-                <motion.div key="out" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full overflow-hidden">
-                  {shot ? (
-                    <>
-                      <video
-                        key={shot}
-                        src={shot}
-                        poster={coverFor(output.poster)}
-                        controls
-                        autoPlay
-                        className="w-full rounded-lg"
-                        onEnded={() => setClipIndex((i) => Math.min(i + 1, clips.length - 1))}
+      <div className="cv-panel st-panel">
+        {/* the stage — media on top, loader centered while rendering */}
+        <div className="st-stage">
+          <AnimatePresence mode="wait">
+            {phase === 'generating' && (
+              <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full h-full flex items-center justify-center">
+                <GenLoader />
+              </motion.div>
+            )}
+            {phase === 'done' && output && (
+              <motion.div key="out" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full h-full">
+                {shot ? (
+                  <video
+                    ref={videoRef}
+                    key={shot}
+                    src={shot}
+                    poster={coverFor(output.poster)}
+                    controls
+                    autoPlay
+                    playsInline
+                    className="st-media"
+                    onPlay={() => setPlaying(true)}
+                    onPause={() => setPlaying(false)}
+                    onEnded={() => {
+                      setPlaying(false)
+                      if (clipIndex < clips.length - 1) setClipIndex(clipIndex + 1)
+                    }}
+                  />
+                ) : (
+                  <img src={coverFor(output.poster)} alt={`${output.symbol} verdict clip`} className="st-media ken-burns" />
+                )}
+                {clips.length > 1 && (
+                  <div className="st-shots">
+                    {clips.map((c, i) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Shot ${i + 1}`}
+                        onClick={() => setClipIndex(i)}
+                        className={`st-shot ${i === clipIndex ? 'on' : ''}`}
                       />
-                      {clips.length > 1 && (
-                        <div className="flex items-center gap-2 mt-2">
-                          {clips.map((c, i) => (
-                            <button
-                              key={c}
-                              type="button"
-                              onClick={() => setClipIndex(i)}
-                              className={`glass-chip ${i === clipIndex ? '!text-accent !border-accent/40' : ''}`}
-                            >
-                              <Film size={11} /> Shot {i + 1} · {i === 0 ? '15s' : '10s'}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <img src={coverFor(output.poster)} alt={`${output.symbol} verdict clip`} className="w-full ken-burns" />
-                  )}
-                </motion.div>
-              )}
-              {phase === 'idle' && !error && (
-                <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6">
-                  <div className="empty-icon mx-auto mb-4"><Video size={22} /></div>
-                  <p className="text-[13px] text-muted">The screen is dark. Generate to roll the clip.</p>
-                </motion.div>
-              )}
-              {error && (
-                <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
-                  <div className="empty-icon mx-auto mb-4"><Video size={22} className="text-danger" /></div>
-                  <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
-                  <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {phase === 'done' && output && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 mt-3">
-              <DownloadBtn
-                onClick={() => downloadDataUrl(shot || output.poster, `verdict-${output.symbol.toLowerCase()}-${shotName}${output.format || 'mp4'}`)}
-                label={`Download ${clips.length > 1 ? `shot ${clipIndex + 1} ` : 'clip '}.${output.format || 'mp4'}`}
-              />
-              <span className="glass-chip">{output.duration}s{clips.length > 1 ? ` · ${clips.length} shots` : ''}</span>
-              <span className="glass-chip">{output.resolution}</span>
-              <button onClick={generate} className="glass-chip"><RefreshCw size={12} /> Regenerate</button>
-            </motion.div>
-          )}
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+            {phase === 'idle' && !error && (
+              <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6">
+                <p className="text-[13px] text-muted">Your clip premieres here.</p>
+              </motion.div>
+            )}
+            {error && (
+              <motion.div key="err" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center px-6 max-w-md">
+                <p className="text-[13px] text-danger mb-3">{friendlyError(error)}</p>
+                <button onClick={generate} className="glass-btn !py-2.5 !text-xs"><RefreshCw size={12} /> Retry</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* three compact tiles: play · runtime · save */}
+        <div className="st-tiles">
+          <button type="button" className="st-tile" disabled={phase !== 'done' || !shot} onClick={togglePlay}>
+            {playing ? <Pause size={16} /> : <Play size={16} />}
+            <span className="st-tile-value">{playing ? 'Pause' : 'Play'}</span>
+            <span className="st-tile-label">stage</span>
+          </button>
+          <div className="st-tile info">
+            <Clock size={16} />
+            <span className="st-tile-value">{output?.duration ?? '—'}</span>
+            <span className="st-tile-label">sec</span>
+          </div>
+          <button type="button" className="st-tile" disabled={phase !== 'done'} onClick={saveClip}>
+            <Download size={16} />
+            <span className="st-tile-value">Save</span>
+            <span className="st-tile-label">{output?.format || 'mp4'}</span>
+          </button>
+        </div>
+
+        {/* one brief line + one CTA */}
+        <p className="st-brief">Turn {script.symbol}&apos;s live verdict into a clip worth sharing.</p>
+        <button type="button" className="st-cta" onClick={generate} disabled={phase === 'generating'}>
+          <Sparkles size={15} /> {phase === 'generating' ? 'Generating…' : output ? 'Generate Again' : 'Generate Now'}
+        </button>
       </div>
 
       <StudioHistoryStrip
         items={history.items}
         activeId={output?.id}
-        onPick={(it) => { setOutput(it); setClipIndex(0); setPhase('done') }}
+        onPick={(it) => { setOutput(it); setClipIndex(0); setPlaying(false); setPhase('done') }}
         renderThumb={(it) => ({ backgroundImage: `url(${coverFor(it.poster)})` })}
       />
     </>

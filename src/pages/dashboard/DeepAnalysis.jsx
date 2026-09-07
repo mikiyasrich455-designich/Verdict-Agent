@@ -12,6 +12,7 @@ import { fetchVerdict } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
+import BookLoader from '../../components/loaders/BookLoader'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, ProgressMeter, TONES,
@@ -46,47 +47,16 @@ function scoreTone(score) {
 
 function DeepSkeleton() {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="cv-panel cv-ghost h-[132px]" />
-      <div className="cv-grid-stats">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="cv-ghost h-[92px]" />)}
-      </div>
-      <div className="cv-panel cv-ghost h-[150px]" />
-      <div className="cv-grid-2">
-        <div className="cv-panel cv-ghost h-[260px]" />
-        <div className="cv-panel cv-ghost h-[260px]" />
-      </div>
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }
 
-function RunningFlow({ symbol }) {
-  const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef(Date.now())
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
-
+function RunningFlow() {
   return (
-    <div className="cv-panel flex flex-col items-center px-6 py-9">
-      <div className="inline-flex items-center gap-3" style={{ color: '#eaf2ff' }}>
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#6ea8ff] border-t-transparent" />
-        <span className="font-mono text-sm">deep-scanning {symbol}…</span>
-        <span className="font-mono text-sm" style={{ color: '#7c89b0' }}>{elapsed}s</span>
-      </div>
-      <p className="mt-4 font-mono text-[11px] tracking-[0.14em]" style={{ color: '#66739a' }}>
-        GATHERING LIVE MARKET DATA · AI REASONING
-      </p>
-      <div className="mt-5 w-full max-w-md">
-        <ProgressMeter value={null} label="deep-scanning" tone="blue" />
-      </div>
-      <div className="mt-5 grid w-full gap-2 sm:grid-cols-2">
-        {[0, 1].map((i) => <div key={i} className="cv-ghost h-[56px]" />)}
-      </div>
+    <div className="flex min-h-[62vh] items-center justify-center">
+      <BookLoader />
     </div>
   )
 }
