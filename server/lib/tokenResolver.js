@@ -1280,8 +1280,29 @@ export async function resolveToken(rawInput) {
     // the token, no matter where its pool ranked.
     const canonSym = byTicker.length ? upper : cleanSymbol(ranked[0]?.pair?.baseToken?.symbol) || upper
     const canon = await canonicalCoin(canonSym)
-    const canonPrice = num(canon?.market_data?.current_price?.usd) || null
-    const cas = platformCAs(canon)
+    let canonPrice = num(canon?.market_data?.current_price?.usd) || null
+    let cas = platformCAs(canon)
+    let canonRank = num(canon?.market_cap_rank) || null
+    if (!cas.length) {
+      // CoinGecko's free API is throttled from shared cloud IPs; the keyed CMC
+      // quote is the backup authority — it publishes the canonical platform
+      // token_address and rank for the ticker's highest-ranked listing.
+      try {
+        const rawItem = (await cmcQuote(canonSym))?.data?.[canonSym]
+        const items = Array.isArray(rawItem) ? rawItem : rawItem ? [rawItem] : []
+        const item = items
+          .slice()
+          .sort((a, b) => (num(a.cmc_rank) || 1e9) - (num(b.cmc_rank) || 1e9))[0]
+        const addr = item?.platform?.token_address
+        if (addr && String(addr).length >= 26) {
+          cas = [{ chain: String(item.platform?.symbol || '').toLowerCase(), ca: String(addr) }]
+        }
+        if (!canonRank) canonRank = num(item?.cmc_rank) || null
+        if (!canonPrice) canonPrice = num(item?.quote?.usd?.price) || null
+      } catch (err) {
+        console.warn('[tokenResolver] cmc canonical fallback skipped:', err.message)
+      }
+    }
     const confirmed = cas.length
       ? ranked.find((g) => cas.some((c) => c.ca.toLowerCase() === String(g.pair?.baseToken?.address || '').toLowerCase()))
       : null
@@ -1306,7 +1327,6 @@ export async function resolveToken(rawInput) {
       // search only surfaced same-ticker strangers at contradictory prices.
       // Obscure canons keep the price-agreement guard so small caps are never
       // hijacked — a genuine small-cap collision can paste its CA instead.
-      const canonRank = num(canon?.market_cap_rank) || null
       const established = canonRank > 0 && canonRank <= 1000
       if (established || searchAgrees) {
         for (const c of cas.slice(0, 3)) {
