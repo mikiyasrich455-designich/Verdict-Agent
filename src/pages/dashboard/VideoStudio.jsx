@@ -10,6 +10,7 @@ import { PageHeader, EmptyState, ErrorState, friendlyError } from '../../compone
 import GenLoader from '../../components/loaders/GenLoader'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import { useStudioHistory, downloadDataUrl, StudioHistoryStrip, coverFor } from './StudioShared'
+import { recallStudio, rememberStudio } from '../../lib/studioCache'
 
 export default function VideoStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -21,9 +22,11 @@ export default function VideoStudio() {
 function VideoStudioInner({ token, pick }) {
   const { status, data: script, error: fetchError } = useAgentData(() => (token ? fetchStudioScript(token) : null), [token])
   const history = useStudioHistory('video')
-  const [phase, setPhase] = useState('idle') // idle | generating | done
+  // A clip already generated for this token comes back with the page —
+  // no re-render, no lost work, until the user picks a different token.
+  const [output, setOutput] = useState(() => recallStudio('video', token))
+  const [phase, setPhase] = useState(() => (recallStudio('video', token) ? 'done' : 'idle')) // idle | generating | done
   const [error, setError] = useState(null)
-  const [output, setOutput] = useState(null)
   const [clipIndex, setClipIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const videoRef = useRef(null)
@@ -93,8 +96,9 @@ function VideoStudioInner({ token, pick }) {
         resolution: res.resolution,
         format: res.format,
       }
-      setOutput(entry)
-      history.push(entry)
+      const saved = history.push(entry) || entry
+      rememberStudio('video', script.symbol, saved)
+      setOutput(saved)
       setPhase('done')
     } catch (err) {
       console.error('[VIDEO-GEN] Error:', err)

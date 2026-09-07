@@ -12,6 +12,7 @@ import { PageHeader, EmptyState, friendlyError } from '../../components/DashUI'
 import GenLoader from '../../components/loaders/GenLoader'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import { downloadDataUrl } from './StudioShared'
+import { recallStudio, rememberStudio } from '../../lib/studioCache'
 
 export default function VoiceStudio() {
   const [searchParams] = useSearchParams()
@@ -23,9 +24,11 @@ function VoiceStudioInner({ token }) {
   const [script, setScript] = useState(null)
   const [loadState, setLoadState] = useState('loading') // loading | ready | error
   const [loadMsg, setLoadMsg] = useState('')
-  const [phase, setPhase] = useState('idle') // idle | generating | done
+  // A narration already generated for this token comes back with the page —
+  // no re-synthesis, no lost work, until the user picks a different token.
+  const [output, setOutput] = useState(() => recallStudio('voice', token))
+  const [phase, setPhase] = useState(() => (recallStudio('voice', token) ? 'done' : 'idle')) // idle | generating | done
   const [error, setError] = useState(null)
-  const [output, setOutput] = useState(null)
   const [speaking, setSpeaking] = useState(false)
   const audioRef = useRef(null)
 
@@ -45,15 +48,9 @@ function VoiceStudioInner({ token }) {
 
   useEffect(() => { load() }, [load])
 
-  // Never leave audio running across runs or unmounts.
+  // Never leave audio running across unmounts. (The inner component remounts
+  // per token via key=, so stopping here is enough — no state wipe needed.)
   useEffect(() => () => { audioRef.current?.pause(); window.speechSynthesis?.cancel() }, [])
-  useEffect(() => {
-    audioRef.current?.pause()
-    window.speechSynthesis?.cancel()
-    setSpeaking(false)
-    setPhase('idle')
-    setOutput(null)
-  }, [token])
 
   // Last-resort narration: assembled from the live verdict payload, word for word real.
   const useVerdictFallback = async () => {
@@ -82,7 +79,7 @@ function VoiceStudioInner({ token }) {
     setError(null)
     try {
       const res = await generateStudioVoice(script)
-      setOutput({
+      const entry = {
         symbol: script.symbol,
         verdict: script.verdict,
         script: res.script,
@@ -90,7 +87,9 @@ function VoiceStudioInner({ token }) {
         tone: res.tone,
         duration: res.duration,
         format: res.format,
-      })
+      }
+      rememberStudio('voice', script.symbol, entry)
+      setOutput(entry)
       setPhase('done')
     } catch (err) {
       setError(err?.message || 'Voice generation failed')
