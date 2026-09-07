@@ -12,9 +12,7 @@ import { fmtPrice } from '../../components/DashUI'
 import { resolveTokenInput } from '../../components/DashboardShell'
 import { setActiveToken, getActiveToken, identityFromParams, tokenHref } from '../../lib/activeToken'
 import { fetchMajors } from '../../lib/api'
-
-const HERO_IMG =
-  'https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=Dark%20cosmic%20space%20scene%2C%20deep%20navy%20blue%20background%2C%20giant%20glowing%20blue%20planet%20horizon%20on%20the%20left%20side%2C%20translucent%20glass%20orb%20sphere%20with%20a%20glowing%20crystal%20four-point%20star%20inside%20floating%20on%20the%20right%2C%20thin%20orbital%20rings%20and%20small%20satellites%2C%20subtle%20purple%20nebula%20glow%2C%20scattered%20stars%2C%20premium%203D%20render%2C%20futuristic%20crypto%20intelligence%20dashboard%20hero%20background%2C%20no%20text&image_size=landscape_16_9'
+import { STUDIO_COVER } from './StudioShared'
 
 const CHIPS = [
   { icon: BarChart3, label: 'Market', to: '/dashboard/overview' },
@@ -90,7 +88,7 @@ export default function YourToken() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
         className="cv-hero px-6 py-8 md:px-9 md:py-10"
-        style={{ '--cv-hero-img': `url("${HERO_IMG}")` }}
+        style={{ '--cv-hero-img': `url("${STUDIO_COVER}")` }}
       >
         <span className="cv-hero-badge"><Boxes size={12} /> AI CRYPTO INTELLIGENCE</span>
         <h1 className="cv-hero-title mt-4">Your Token</h1>
