@@ -5,6 +5,7 @@ import { Scale, Crown, Plus, X, RefreshCw, Coins, Gauge, Activity, ShieldAlert, 
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { fetchCompare } from '../../lib/api'
+import { stanceOf } from '../../lib/stance'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, TokenLogo, MicroLabel, TONES,
 } from '../../components/ConsoleUI'
@@ -33,7 +34,9 @@ const METRICS = [
   })),
 ]
 
-const verdictTone = (v) => (v === 'BUY' ? 'up' : v === 'AVOID' ? 'down' : 'amber')
+// Stance tone → ConsoleUI tone bridge: POSITIVE reads teal-up, NEUTRAL amber, CAUTION red-down.
+const STANCE_TONE = { positive: 'up', neutral: 'amber', risk: 'down' }
+const verdictTone = (v) => STANCE_TONE[stanceOf(v).tone] || 'blue'
 
 function StancePill({ label, tone }) {
   const color = TONES[tone] || TONES.blue
@@ -217,13 +220,14 @@ export default function Compare() {
             const lead = tokens[leadIdx]
             const leadWins = counts[leadIdx]
             const agentPick = tokens.find((t) => String(t.symbol).toUpperCase() === String(data.winner || '').toUpperCase()) || null
+            const pickStance = agentPick ? stanceOf(agentPick.verdict) : null
             const pickTone = agentPick ? verdictTone(agentPick.verdict) : 'blue'
             const answer =
               `${(agentPick || lead).symbol} takes the round`
               + (leadWins > 0 ? ` — it leads ${leadWins} of ${scored.length} scored live metrics` : ` — no token leads a clear majority of the ${scored.length} scored metrics`)
               + `: ${fmtPrice(lead.priceUsd)} at ${fmtPct(lead.change24h)} on the day, ${fmtUsd(lead.marketCap)} cap and ${fmtUsd(lead.volume24h)} of tape.`
               + (agentPick
-                ? ` The agent ranks ${agentPick.symbol} ${agentPick.verdict} on ${fmtNum(agentPick.confidence)}/100 conviction.`
+                ? ` The agent ranks ${agentPick.symbol} ${pickStance.label} on ${fmtNum(agentPick.confidence)}/100 conviction.`
                 : ' The agent did not name a winner this round.')
 
             return (
@@ -233,7 +237,7 @@ export default function Compare() {
                   icon={Crown}
                   kicker={`Compare · ${tokens.length} tokens`}
                   answer={answer}
-                  stance={<StancePill label={agentPick ? `${agentPick.symbol} ${agentPick.verdict}` : `${lead.symbol} leads`} tone={pickTone} />}
+                  stance={<StancePill label={agentPick ? `${agentPick.symbol} ${pickStance.label}` : `${lead.symbol} leads`} tone={pickTone} />}
                   confidence={agentPick ? agentPick.confidence : null}
                   confidenceTone={pickTone}
                   chips={[
@@ -261,7 +265,7 @@ export default function Compare() {
                     icon={Crown}
                     label="Agent pick"
                     value={data.winner ? String(data.winner).toUpperCase() : '—'}
-                    foot={agentPick ? `${agentPick.verdict} · ${fmtNum(agentPick.confidence)}/100 conviction` : 'the agent named no winner'}
+                    foot={agentPick ? `${pickStance.label} · ${fmtNum(agentPick.confidence)}/100 conviction` : 'the agent named no winner'}
                     delay={0.02 + tokens.length * 0.04}
                   />
                 </div>
@@ -305,15 +309,18 @@ export default function Compare() {
                       right={<MicroLabel>agent reasoning</MicroLabel>}
                       delay={0.2}
                     >
-                      {tokens.map((t) => (
-                        <InsightRow
-                          key={t.symbol}
-                          icon={t.verdict === 'BUY' ? TrendingUp : t.verdict === 'AVOID' ? ShieldAlert : Gauge}
-                          tone={verdictTone(t.verdict)}
-                          title={`${t.symbol} — ${t.verdict} at ${fmtNum(t.confidence)}/100 conviction`}
-                          body={t.reason || 'The agent returned no written reasoning for this token.'}
-                        />
-                      ))}
+                      {tokens.map((t) => {
+                        const ts = stanceOf(t.verdict)
+                        return (
+                          <InsightRow
+                            key={t.symbol}
+                            icon={ts.key === 'POSITIVE' ? TrendingUp : ts.key === 'CAUTION' ? ShieldAlert : Gauge}
+                            tone={STANCE_TONE[ts.tone] || 'blue'}
+                            title={`${t.symbol} — ${ts.label} at ${fmtNum(t.confidence)}/100 conviction`}
+                            body={t.reason || 'The agent returned no written reasoning for this token.'}
+                          />
+                        )
+                      })}
                     </PanelV2>
                   </div>
 
@@ -342,7 +349,7 @@ export default function Compare() {
                               </p>
                             </div>
                             <div className="text-right">
-                              <StancePill label={t.verdict} tone={verdictTone(t.verdict)} />
+                              <StancePill label={stanceOf(t.verdict).label} tone={verdictTone(t.verdict)} />
                               <p className="mt-1.5 font-mono text-[10px]" style={{ color: '#66739a' }}>
                                 {counts[tokens.indexOf(t)]}/{scored.length} rows won
                               </p>

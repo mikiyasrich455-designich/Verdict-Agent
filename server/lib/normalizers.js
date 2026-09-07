@@ -163,10 +163,10 @@ function analyzeMarketContext(market, perf) {
 
 function deriveVerdict(bullTotal, bearTotal) {
   const diff = bullTotal - bearTotal
-  if (diff >= 15) return { verdict: 'BUY', confidence: clamp(50 + diff) }
-  if (diff >= 5) return { verdict: 'HOLD', confidence: clamp(50 + Math.abs(diff)) }
-  if (diff <= -15) return { verdict: 'AVOID', confidence: clamp(50 + Math.abs(diff)) }
-  return { verdict: 'HOLD', confidence: 50 }
+  if (diff >= 15) return { verdict: 'POSITIVE', confidence: clamp(50 + diff) }
+  if (diff >= 5) return { verdict: 'NEUTRAL', confidence: clamp(50 + Math.abs(diff)) }
+  if (diff <= -15) return { verdict: 'CAUTION', confidence: clamp(50 + Math.abs(diff)) }
+  return { verdict: 'NEUTRAL', confidence: 50 }
 }
 
 // ── Verdict shape (dashboard verdict page) ──────────────────────
@@ -193,11 +193,11 @@ export function normalizeVerdict(ryoRaw, fallbackSymbol) {
   const allBullReasons = [...techAnalysis.reasons.bull, ...catalystAnalysis.reasons.bull, ...marketAnalysis.reasons.bull]
   const allBearReasons = [...techAnalysis.reasons.bear, ...catalystAnalysis.reasons.bear, ...marketAnalysis.reasons.bear]
 
-  const summary = verdict === 'BUY'
-    ? `The evidence strongly supports a ${verdict} position. ${allBullReasons.slice(0, 3).join('. ')}. Risk-reward favors commitment with defined stops.`
-    : verdict === 'AVOID'
-      ? `The risk profile is unfavorable. ${allBearReasons.slice(0, 3).join('. ')}. Preservation of capital outweighs participation at this time.`
-      : `Signals are mixed. ${allBullReasons.slice(0, 2).join('. ')}. However, ${allBearReasons.slice(0, 2).join('. ')}. Wait for clearer confirmation before committing.`
+  const summary = verdict === 'POSITIVE'
+    ? `The evidence leans positive. ${allBullReasons.slice(0, 3).join('. ')}. The positives currently outweigh the identified risks — do your own research before acting.`
+    : verdict === 'CAUTION'
+      ? `The risk profile is elevated. ${allBearReasons.slice(0, 3).join('. ')}. The risks currently outweigh the positives — do your own research before acting.`
+      : `Signals are mixed. ${allBullReasons.slice(0, 2).join('. ')}. However, ${allBearReasons.slice(0, 2).join('. ')}. Neither side dominates yet — do your own research.`
 
   return {
     symbol: (asset.symbol || fallbackSymbol || 'UNKNOWN').toUpperCase(),
@@ -211,7 +211,7 @@ export function normalizeVerdict(ryoRaw, fallbackSymbol) {
       market: { score: marketAnalysis.bullScore, reasoning: marketAnalysis.reasons.bull.slice(0, 2).join('. ') + '.' },
       risk: { score: 100 - bearTotal, reasoning: bearTotal > 60 ? 'Risk factors are elevated — size down and use wider stops.' : bearTotal > 40 ? 'Risk is moderate — define your stops clearly.' : 'Risk is contained — normal position sizing applies.' },
       catalyst: { score: catalystAnalysis.bullScore, reasoning: catalystAnalysis.reasons.bull.slice(0, 2).join('. ') + '.' },
-      sentiment: { score: Math.round((bullTotal + (100 - bearTotal)) / 2), reasoning: `Bull case at ${bullTotal}% vs bear case at ${bearTotal}%. ${verdict === 'BUY' ? 'Momentum favors the bulls.' : verdict === 'AVOID' ? 'Bears have the edge here.' : 'Neither side has conviction yet.'}` },
+      sentiment: { score: Math.round((bullTotal + (100 - bearTotal)) / 2), reasoning: `Bull case at ${bullTotal}% vs bear case at ${bearTotal}%. ${verdict === 'POSITIVE' ? 'Momentum favors the positive case.' : verdict === 'CAUTION' ? 'The risk side has the edge here.' : 'Neither side has conviction yet.'}` },
     },
     verdict,
     confidence,
@@ -560,14 +560,14 @@ export function normalizeRiskDesk(ryoRaw, limits = { maxPosition: 5, stopLoss: 8
   const stop = entry - atr * 2
   const target = entry + atr * 3.5
   const size = Number(((limits.maxPosition / 100) * 10000).toFixed(0))
-  const qualified = v.confidence >= limits.minConviction && (v.verdict === 'BUY' || v.verdict === 'HOLD')
+  const qualified = v.confidence >= limits.minConviction && v.verdict !== 'CAUTION'
 
   return {
     symbol: v.symbol,
     qualified,
     signals: [
       { label: `Conviction ≥ ${limits.minConviction}`, value: v.confidence, pass: v.confidence >= limits.minConviction },
-      { label: 'Verdict is BUY or HOLD', value: v.verdict, pass: v.verdict !== 'AVOID' },
+      { label: 'Stance is not CAUTION', value: v.verdict, pass: v.verdict !== 'CAUTION' },
       { label: 'Volatility < 80', value: p.volatility, pass: p.volatility < 80 },
       { label: 'Catalyst in window', value: p.catalysts.length > 0 ? 'yes' : 'no', pass: p.catalysts.length > 0 },
     ],
@@ -587,7 +587,7 @@ export function normalizeRiskDesk(ryoRaw, limits = { maxPosition: 5, stopLoss: 8
 // ── Studio script shape ─────────────────────────────────────────
 export function normalizeStudioScript(ryoRaw) {
   const v = normalizeVerdict(ryoRaw)
-  const tone = v.verdict === 'BUY' ? 'confident and steady' : v.verdict === 'HOLD' ? 'measured and calm' : 'firm and cautionary'
+  const tone = v.verdict === 'POSITIVE' ? 'confident and steady' : v.verdict === 'CAUTION' ? 'firm and cautionary' : 'measured and calm'
 
   return {
     symbol: v.symbol,
@@ -595,13 +595,13 @@ export function normalizeStudioScript(ryoRaw) {
     confidence: v.confidence,
     bullScore: v.bullScore,
     bearScore: v.bearScore,
-    script: `${v.name}. The council has spoken. Bull score: ${v.bullScore} percent. Bear score: ${v.bearScore} percent. Verdict: ${v.verdict} with ${v.confidence} percent confidence. ${v.summary} This is not financial advice. Trade the evidence, not the noise.`,
+    script: `${v.name}. The council has spoken. Bull score: ${v.bullScore} percent. Bear score: ${v.bearScore} percent. Stance: ${v.verdict} with ${v.confidence} percent confidence. ${v.summary} This is not financial advice. Do your own research — trade the evidence, not the noise.`,
     tone,
     duration: `~${Math.max(8, Math.round(v.summary.length / 15))}s`,
     artDirection: {
-      BUY: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
-      HOLD: { palette: ['#5b93ff', '#a78bfa', '#64748b'], motif: 'Balanced scales of light suspended above a glowing market grid, calm, cinematic' },
-      AVOID: { palette: ['#f87171', '#5b93ff', '#334155'], motif: 'Red bear chains wrapped around a fracturing coin, dramatic shadows, warning mood' },
+      POSITIVE: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
+      NEUTRAL: { palette: ['#5b93ff', '#a78bfa', '#64748b'], motif: 'Balanced scales of light suspended above a glowing market grid, calm, cinematic' },
+      CAUTION: { palette: ['#f87171', '#5b93ff', '#334155'], motif: 'Red bear chains wrapped around a fracturing coin, dramatic shadows, warning mood' },
     }[v.verdict],
   }
 }
@@ -640,9 +640,9 @@ export function normalizeDebate(ryoRaw) {
   let finalVerdict = v.verdict
 
   const judgeTexts = {
-    BUY: `The bull case carries more evidentiary weight: structure, participation and catalyst all point the same direction. Conviction threshold cleared — the data supports commitment with defined risk.`,
-    AVOID: `The bear case dominates the evidence. Risk is elevated and the reward profile is weak. Discipline says stand aside — capital preserved is capital available for a real setup.`,
-    HOLD: `Both arguments landed punches. The momentum case is real, but the risk case is not dismissible. Discipline says hold: re-evaluate on a confirmed break or a defined pullback.`,
+    POSITIVE: `The positive case carries more evidentiary weight: structure, participation and catalyst all point the same direction. The positives currently outweigh the identified risks. Do your own research before acting.`,
+    CAUTION: `The risk case dominates the evidence. Risk is elevated and the positives are thin. The risks currently outweigh the positives. Do your own research before acting.`,
+    NEUTRAL: `Both arguments landed punches. The positive case is real, but the risk case is not dismissible. Neither side dominates yet — do your own research.`,
   }
 
   return {

@@ -153,6 +153,48 @@ export async function aceVideoPoll(taskId) {
   return normalizeTask(await res.json())
 }
 
+// ─── REAL WEB INTELLIGENCE: Google SERP (verified live: POST /serp/google) ────
+// Returns genuine search results with real links, real dates and real thumbnails —
+// never model-invented URLs. ~0.01 credit per call.
+//   type: 'search' -> { organic:[{title,link,snippet,date,position}] }
+//   type: 'news'   -> { news:[{title,link,snippet,date,source,image_url}] }
+//   type: 'videos' -> { videos:[{title,link,snippet,date,source,channel,image_url,duration}] }
+export async function aceSerp(query, opts = {}) {
+  requireKey()
+  const q = String(query || '').trim()
+  if (!q) throw new Error('SERP query is empty')
+
+  const body = {
+    query: q,
+    type: ['search', 'news', 'images', 'videos', 'maps', 'places'].includes(opts.type) ? opts.type : 'search',
+    number: Math.min(20, Math.max(1, Number(opts.number) || 10)),
+  }
+  if (opts.range) body.range = opts.range          // qdr:h | qdr:d | qdr:w | qdr:m | qdr:y
+  if (opts.country) body.country = opts.country
+  if (opts.language) body.language = opts.language
+  if (opts.page) body.page = opts.page
+
+  const res = await fetch(`${ACE_BASE}/serp/google`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${ACE_KEY}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(Number(opts.timeoutMs) || 25000),
+  })
+  if (!res.ok) throw new Error(`AceData SERP failed: ${res.status} ${(await res.text()).slice(0, 200)}`)
+
+  const data = await res.json()
+  return {
+    organic: Array.isArray(data.organic) ? data.organic : [],
+    news: Array.isArray(data.news) ? data.news : [],
+    videos: Array.isArray(data.videos) ? data.videos : [],
+    images: Array.isArray(data.images) ? data.images : [],
+  }
+}
+
+export function aceSerpAvailable() {
+  return Boolean(ACE_KEY)
+}
+
 // Both Sora and Veo tasks resolve to the same shape: { response: { data: [{ video_url, state }] } }.
 function normalizeTask(data) {
   const resp = data?.response || data

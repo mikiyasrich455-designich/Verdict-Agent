@@ -12,6 +12,8 @@ import {
 import { discoverKols } from '../lib/kolDiscovery.js'
 import { resolveCaInBody } from '../lib/caGuard.js'
 import { callLLM, callSearch, QWEN_MODELS } from '../lib/llm.js'
+import { stanceKey, stanceLabel, stanceFromScores, stanceFromDiff, STANCE_RULES, DYOR_SHORT } from '../lib/stance.js'
+import { assessMemecoinRisk, riskPromptBlock } from '../lib/memeRisk.js'
 
 const router = Router()
 
@@ -122,6 +124,10 @@ async function deepAnalyze(symbol, live = null) {
   const liveVol = Number(live?.volume24h) || 0
   const liveLiq = Number(live?.liquidityUsd) || 0
 
+  // Structural memecoin risk read — computed from live liquidity, pool age, tape,
+  // wallets and volatility. Injected so the model reasons from real risk numbers.
+  const riskAssessment = live ? assessMemecoinRisk(live) : null
+
   const priceUsd = livePrice > 0 ? livePrice : (market.price_usd || 0)
   const change24h = Number.isFinite(liveChange) ? liveChange : (perf.change_24h_pct || 0)
   const marketCapUsd = liveCap > 0 ? liveCap : (market.market_cap_usd || 0)
@@ -146,7 +152,7 @@ CURRENT PRICE: $${priceUsd.toLocaleString()}
 MARKET CAP: $${(marketCapUsd / 1e6).toFixed(1)}M
 24H VOLUME: $${(volume24hUsd / 1e6).toFixed(1)}M
 ${liveLiq > 0 ? `LIQUIDITY: $${(liveLiq / 1e6).toFixed(1)}M\n` : ''}${live?.buys24h != null ? `24H TAPE: ${live.buys24h || 0} buys / ${live.sells24h || 0} sells\n` : ''}${live?.pairAgeDays != null ? `POOL AGE: ${Number(live.pairAgeDays).toFixed(0)} days\n` : ''}
-
+${riskAssessment ? `\n${riskPromptBlock(riskAssessment)}\n` : ''}
 TECHNICAL INDICATORS:
 - RSI(14): ${tech.rsi_14 || 'N/A'}
 - ATR(14): ${tech.atr_14_pct || 'N/A'}%
@@ -164,7 +170,7 @@ ${serpText}
 YOUR TASK — Respond with ONLY a single valid JSON object (no markdown, no code fences, no prose before or after) using EXACTLY these keys:
 
 {
-  "verdict": "BUY" | "HOLD" | "AVOID",
+  "verdict": "POSITIVE" | "NEUTRAL" | "CAUTION",
   "confidence": <0-100 integer>,
   "bullScore": <0-100 integer>,
   "bearScore": <0-100 integer>,
@@ -186,8 +192,12 @@ IMPORTANT RULES:
 - bullReasons and bearReasons MUST each have 3-5 concrete, evidence-based strings (not empty).
 - Each pillar object MUST have both "score" (number) and "reasoning" (non-empty string).
 - Be specific. Use actual numbers, dates, events from the data. Don't hedge.
-- bullScore + bearScore ≈ 100 (±15). Verdict: BUY if bull>bear+15, AVOID if bear>bull+15, else HOLD.
-- Ground all reasoning in the provided market data and web results. Never name the data providers, tools or models behind the inputs — write as an analyst, not an integration log.`
+- When the STRUCTURAL MEMECOIN RISK READ above is present, reason from it explicitly: liquidity depth, token/pair age, tape flow, wallet participation and volatility must drive the "risk" pillar, the stance and the bearReasons. Disclose data gaps instead of assuming they are fine.
+- bullScore + bearScore ≈ 100 (±15). Stance: POSITIVE if bull>bear+15, CAUTION if bear>bull+15, else NEUTRAL.
+- Ground all reasoning in the provided market data and web results.
+- End "finalThesis" by handing the decision back to the reader: remind them to do their own research.
+
+${STANCE_RULES}`
 
   // Reasoning pass — capped. A slow or hung model must never become a dead page.
   console.log(`[DEEP] ${symbolUpper}: Calling reasoning model for analysis...`)
@@ -234,9 +244,7 @@ IMPORTANT RULES:
     change24h,
     bullScore: clampScore(firstNum(analysis.bullScore, analysis.bull_score)),
     bearScore: clampScore(firstNum(analysis.bearScore, analysis.bear_score)),
-    verdict: ['BUY', 'HOLD', 'AVOID'].includes(String(analysis.verdict || '').toUpperCase())
-      ? String(analysis.verdict).toUpperCase()
-      : 'HOLD',
+    verdict: stanceKey(analysis.verdict),
     confidence: clampScore(firstNum(analysis.confidence)),
     summary: analysis.summary || analysis.overview || analysis.overall_summary || 'Analysis complete.',
     bullReasons: firstArr(analysis.bullReasons, analysis.bull_case, analysis.bull, analysis.bullPoints).slice(0, 5),
@@ -250,6 +258,14 @@ IMPORTANT RULES:
     },
     keyLevels: analysis.keyLevels || analysis.key_levels || analysis.levels || {},
     finalThesis: analysis.finalThesis || analysis.final_thesis || analysis.thesis || analysis.conclusion || '',
+    riskAssessment: riskAssessment ? {
+      grade: riskAssessment.grade,
+      gradeNote: riskAssessment.gradeNote,
+      riskScore: riskAssessment.riskScore,
+      positivityScore: riskAssessment.positivityScore,
+      metrics: riskAssessment.metrics,
+      dataGaps: riskAssessment.dataGaps,
+    } : null,
     degraded,
     asOf: new Date().toISOString(),
     timing: {
@@ -290,7 +306,7 @@ function liveDataFallback({ priceUsd, change24h, perf, tech, marketCapUsd, volum
 
   const bullScore = clampScore(bull)
   const bearScore = clampScore(100 - bullScore)
-  const verdict = bullScore > bearScore + 15 ? 'BUY' : bearScore > bullScore + 15 ? 'AVOID' : 'HOLD'
+  const verdict = stanceFromScores(bullScore, bearScore)
 
   return {
     verdict,
@@ -328,7 +344,7 @@ function liveDataFallback({ priceUsd, change24h, perf, tech, marketCapUsd, volum
     keyLevels: p > 0
       ? { support: usd(p * 0.92), resistance: usd(p * 1.1), stopLoss: usd(p * 0.88), target: usd(p * 1.18) }
       : {},
-    finalThesis: `Data-only verdict: ${verdict} at ${bullScore}/${bearScore} bull-bear. Re-run for the full forensic read with news and reasoning.`,
+    finalThesis: `Data-only read: ${verdict} at ${bullScore}/${bearScore} bull-bear. Re-run for the full forensic read with news and reasoning. ${DYOR_SHORT}`,
   }
 }
 
@@ -528,11 +544,11 @@ function councilKey(req, prefix) {
   return `${prefix}:${id.toLowerCase()}`
 }
 
-const BULL_ROLE = `You are the BULL advocate on a professional crypto trading desk. Your only job is to build the strongest evidence-based case for commitment (long exposure) in the token under review. Argue strictly from the evidence pack provided: cite prices, volume, liquidity, tape flow, pool age, catalysts and headlines. Surface upside the others miss and treat risks as priced-in or manageable only when the evidence supports it. Never name data providers, APIs or models. Plain text only, no markdown.`
+const BULL_ROLE = `You are the BULL advocate on a professional crypto research desk. Your only job is to build the strongest evidence-based case that the POSITIVITY around this token outweighs its risks. Argue strictly from the evidence pack provided: cite prices, volume, liquidity, tape flow, pool age, wallet participation, catalysts and headlines. Surface upside the others miss and treat risks as manageable only when the evidence supports it. You never instruct anyone to buy, hold or sell anything — you argue a research case and leave the decision to the reader. Never name data providers, APIs or models. Plain text only, no markdown.`
 
-const BEAR_ROLE = `You are the BEAR advocate on a professional crypto trading desk. Your only job is to build the strongest evidence-based case for caution (reducing or avoiding exposure) in the token under review. Argue strictly from the evidence pack provided: cite liquidity depth, sell pressure, wallet concentration, valuation, pool age and risk headlines. Stress-test bullish claims and expose what the bulls ignore. Never name data providers, APIs or models. Plain text only, no markdown.`
+const BEAR_ROLE = `You are the BEAR advocate on a professional crypto research desk. Your only job is to build the strongest evidence-based case that the RISKS around this token dominate its positives. Argue strictly from the evidence pack provided: cite liquidity depth, sell pressure, wallet concentration and participation, token/pair age, volatility, valuation and risk headlines. Stress-test the positive claims and expose what the bulls ignore. You never instruct anyone to buy, hold or sell anything — you argue a research case and leave the decision to the reader. Never name data providers, APIs or models. Plain text only, no markdown.`
 
-const JUDGE_ROLE = `You are the neutral JUDGE of a crypto trading desk council. You never take sides in advance. You weigh the bull and bear arguments strictly against the evidence pack: claims grounded in specific numbers outrank rhetoric. You score each advocate 0-100 for evidentiary grounding and issue one ruling (BUY, HOLD or AVOID) with a confidence score. Never name data providers, APIs or models.`
+const JUDGE_ROLE = `You are the neutral JUDGE of a crypto research desk council. You never take sides in advance. You weigh the bull and bear arguments strictly against the evidence pack: claims grounded in specific numbers outrank rhetoric. You score each advocate 0-100 for evidentiary grounding and issue one research stance — POSITIVE (evidence leans constructive), NEUTRAL (evidence is two-sided) or CAUTION (evidence leans toward meaningful risk) — with a confidence score. You never instruct anyone to buy, hold, sell or avoid anything, and every ruling reminds the reader to do their own research. Never name data providers, APIs or models.`
 
 // Evidence packs are expensive (RYO + 2 grounded searches). Cache them briefly so a
 // council reload or a second agent hitting the same token doesn't pay the full cost.
@@ -565,6 +581,12 @@ async function buildEvidencePack(symbol, live) {
     lines.push(`- 24h tape: ${live.buys24h || 0} buys / ${live.sells24h || 0} sells (${live.uniqueBuyers24h || 0} buyers / ${live.uniqueSellers24h || 0} wallets)`)
     lines.push(`- Pool age: ${Number(live.pairAgeDays || 0).toFixed(0)} days`)
     if (Number.isFinite(Number(live.athChangePct))) lines.push(`- Distance from ATH: ${Number(live.athChangePct).toFixed(1)}%`)
+    // Structural memecoin risk read so both advocates argue over real risk numbers.
+    const riskBlock = riskPromptBlock(assessMemecoinRisk(live))
+    if (riskBlock) {
+      lines.push('')
+      lines.push(riskBlock)
+    }
   }
 
   if (ryoRes.status === 'fulfilled') {
@@ -606,18 +628,18 @@ async function runCouncil(symbol, live) {
   const [bullOpenRes, bearOpenRes] = await Promise.all([
     callLLM([
       { role: 'system', content: BULL_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for commitment. 90-130 words. Cite specific numbers from the pack.` },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case that the POSITIVITY around ${name} outweighs its risks. 90-130 words. Cite specific numbers from the pack — liquidity depth, pool age, tape flow, wallet participation, price movement.` },
     ], QWEN_MODELS.bull, 500, { timeoutMs: 25000 }).catch(() => ''),
     callLLM([
       { role: 'system', content: BEAR_ROLE },
-      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case for caution. 90-130 words. Cite specific numbers from the pack.` },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nDeliver your opening case that the RISKS around ${name} dominate its positives. 90-130 words. Cite specific numbers from the pack — liquidity depth, pool age, tape flow, wallet participation, price movement.` },
     ], QWEN_MODELS.bear, 500, { timeoutMs: 25000 }).catch(() => ''),
   ])
-  const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — structure supports commitment.`
-  const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — caution is warranted until depth improves.`
+  const bullOpen = String(bullOpenRes || '').trim() || `The pack shows ${name} trading at $${Number(live?.priceUsd || 0)} with live tape flow and an active pool — the structural positives deserve weight.`
+  const bearOpen = String(bearOpenRes || '').trim() || `The pack shows thin liquidity and uncertain flow for ${name} — the structural risks outweigh the positives until depth improves.`
 
   // Round 2 — cross-examination (parallel, each reads the other's opening)
-  const [bullRebutRes, bearRebutRes] = await Promise.all([
+  const [bullCrossRes, bearCrossRes] = await Promise.all([
     callLLM([
       { role: 'system', content: BULL_ROLE },
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate opened with:\n"${bearOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
@@ -627,21 +649,61 @@ async function runCouncil(symbol, live) {
       { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate opened with:\n"${bullOpen}"\n\nCross-examine it. Dismantle its two weakest points with evidence from the pack and defend your thesis. 70-100 words.` },
     ], QWEN_MODELS.bear, 400, { timeoutMs: 22000 }).catch(() => ''),
   ])
-  const bullRebut = String(bullRebutRes || '').trim() || bullOpen
-  const bearRebut = String(bearRebutRes || '').trim() || bearOpen
+  const bullCross = String(bullCrossRes || '').trim() || bullOpen
+  const bearCross = String(bearCrossRes || '').trim() || bearOpen
 
-  // Round 3 — judge rules over the full transcript
+  // Round 3 — rebuttals (parallel, each answers the cross-examination it took)
+  const [bullRebutRes, bearRebutRes] = await Promise.all([
+    callLLM([
+      { role: 'system', content: BULL_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BEAR advocate cross-examined your opening like this:\n"${bearCross}"\n\nRebut it directly. Concede what the evidence genuinely concedes, refute the rest with numbers from the pack. 70-100 words.` },
+    ], QWEN_MODELS.bull, 400, { timeoutMs: 20000 }).catch(() => ''),
+    callLLM([
+      { role: 'system', content: BEAR_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nThe BULL advocate cross-examined your opening like this:\n"${bullCross}"\n\nRebut it directly. Concede what the evidence genuinely concedes, refute the rest with numbers from the pack. 70-100 words.` },
+    ], QWEN_MODELS.bear, 400, { timeoutMs: 20000 }).catch(() => ''),
+  ])
+  const bullRebut = String(bullRebutRes || '').trim() || bullCross
+  const bearRebut = String(bearRebutRes || '').trim() || bearCross
+
+  // Round 4 — closing statements (parallel, each sees the full six-message transcript)
+  const debateSoFar = [
+    `BULL OPENING: ${bullOpen}`,
+    `BEAR OPENING: ${bearOpen}`,
+    `BULL CROSS-EXAMINATION: ${bullCross}`,
+    `BEAR CROSS-EXAMINATION: ${bearCross}`,
+    `BULL REBUTTAL: ${bullRebut}`,
+    `BEAR REBUTTAL: ${bearRebut}`,
+  ].join('\n')
+  const [bullCloseRes, bearCloseRes] = await Promise.all([
+    callLLM([
+      { role: 'system', content: BULL_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nFULL DEBATE SO FAR:\n${debateSoFar}\n\nDeliver your closing statement. Name the two strongest surviving points for the positive side after four rounds of scrutiny. 60-90 words.` },
+    ], QWEN_MODELS.bull, 350, { timeoutMs: 18000 }).catch(() => ''),
+    callLLM([
+      { role: 'system', content: BEAR_ROLE },
+      { role: 'user', content: `EVIDENCE PACK:\n${evidence}\n\nFULL DEBATE SO FAR:\n${debateSoFar}\n\nDeliver your closing statement. Name the two strongest surviving points for the risk side after four rounds of scrutiny. 60-90 words.` },
+    ], QWEN_MODELS.bear, 350, { timeoutMs: 18000 }).catch(() => ''),
+  ])
+  const bullClose = String(bullCloseRes || '').trim() || bullRebut
+  const bearClose = String(bearCloseRes || '').trim() || bearRebut
+
+  // Judge rules over the complete eight-entry transcript
   const judgePrompt = `FULL TRANSCRIPT:
 BULL OPENING: ${bullOpen}
 BEAR OPENING: ${bearOpen}
-BULL CROSS-EXAMINATION: ${bullRebut}
-BEAR CROSS-EXAMINATION: ${bearRebut}
+BULL CROSS-EXAMINATION: ${bullCross}
+BEAR CROSS-EXAMINATION: ${bearCross}
+BULL REBUTTAL: ${bullRebut}
+BEAR REBUTTAL: ${bearRebut}
+BULL CLOSING: ${bullClose}
+BEAR CLOSING: ${bearClose}
 
 EVIDENCE PACK:
 ${evidence}
 
 Score how well each side grounded its claims in the evidence (0-100 each), then rule. Respond with ONLY a valid JSON object:
-{"bullScore": <0-100>, "bearScore": <0-100>, "verdict": "BUY"|"HOLD"|"AVOID", "confidence": <0-100>, "text": "<3-5 sentence ruling citing the decisive evidence. Never name data providers, APIs or models.>"}`
+{"bullScore": <0-100>, "bearScore": <0-100>, "verdict": "POSITIVE"|"NEUTRAL"|"CAUTION", "confidence": <0-100>, "text": "<3-5 sentence ruling citing the decisive evidence and ending with a reminder that the reader must do their own research. Never name data providers, APIs or models. Never instruct anyone to buy, hold, sell or avoid anything.>"}`
 
   let judge = extractJson(await callLLM([
     { role: 'system', content: JUDGE_ROLE },
@@ -660,13 +722,11 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
   const bear01 = +(bear100 / 100).toFixed(2)
   const diff = +(bull01 - bear01).toFixed(2)
   const threshold = 0.15
-  let verdict = String(judge?.verdict || '').toUpperCase()
-  if (!['BUY', 'HOLD', 'AVOID'].includes(verdict)) {
-    verdict = diff > threshold ? 'BUY' : diff < -threshold ? 'AVOID' : 'HOLD'
-  }
+  const verdict = judge?.verdict ? stanceKey(judge.verdict) : stanceFromDiff(bull01, bear01, threshold)
   const confidence = clampScore(firstNum(judge?.confidence, 50 + Math.abs(diff) * 100))
-  const judgeText = String(judge?.text || '').trim() ||
-    `The council weighed both sides on the live evidence. The bull scored ${bull100} and the bear ${bear100}. The ruling is ${verdict}.`
+  let judgeText = String(judge?.text || '').trim() ||
+    `The council weighed both sides on the live evidence. The bull scored ${bull100} and the bear ${bear100}. The ruling is ${stanceLabel(verdict)}.`
+  if (!/own research|not financial advice/i.test(judgeText)) judgeText += ` ${DYOR_SHORT}`
 
   return {
     symbol: sym,
@@ -674,8 +734,12 @@ Score how well each side grounded its claims in the evidence (0-100 each), then 
     messages: [
       { role: 'bull', text: bullOpen },
       { role: 'bear', text: bearOpen },
+      { role: 'bull', text: bullCross },
+      { role: 'bear', text: bearCross },
       { role: 'bull', text: bullRebut },
       { role: 'bear', text: bearRebut },
+      { role: 'bull', text: bullClose },
+      { role: 'bear', text: bearClose },
     ],
     judge: { bullScore: bull01, bearScore: bear01, diff, threshold, verdict, confidence, text: judgeText },
     verdictData: {
@@ -742,8 +806,9 @@ router.post('/narrative', async (req, res) => {
       return res.json(cached)
     }
 
-    // Use real KOL discovery instead of fake normalizeNarrative
-    const data = await discoverKols(symbol)
+    // Use real KOL discovery instead of fake normalizeNarrative.
+    // Pass the live token identity so news can be fact-checked against real numbers.
+    const data = await discoverKols(symbol, req.tokenIdentity)
     data.symbol = symbol.toUpperCase()
 
     setCache(cacheKey, data, 5 * 60 * 1000)
@@ -819,11 +884,11 @@ router.post('/script', async (req, res) => {
     console.log('[SCRIPT] Fast studio script (single LLM pass over live data)...')
     const scriptRes = await callLLM([
       { role: 'system', content: 'You are a professional crypto studio writer. Output ONLY valid JSON — no markdown, no code fences, no prose.' },
-      { role: 'user', content: `Write a short, evidence-grounded market analysis for a video about ${sym}. Use ONLY the live data below. Lead with a verdict, then the bull case vs the bear case, weighing growth potential against risk. No buy/sell instructions, no hype, no fear.\n\nNAME: ${live.name || sym}\nPRICE: $${priceUsd.toLocaleString()}\n24H CHANGE: ${change24h.toFixed(2)}%\nMARKET CAP: $${(cap / 1e6).toFixed(1)}M\n24H VOLUME: $${(vol / 1e6).toFixed(1)}M\n\nRespond with ONLY JSON:\n{"verdict":"BUY"|"HOLD"|"AVOID","confidence":<0-100>,"bullScore":<0-100>,"bearScore":<0-100>,"script":"<150-220 word spoken script>"}` },
+      { role: 'user', content: `Write a short, evidence-grounded market analysis for a video about ${sym}. Use ONLY the live data below. Lead with a research stance, then the bull case vs the bear case, weighing positives against risks. Never instruct anyone to buy, hold, sell or avoid anything. No hype, no fear.\n\nNAME: ${live.name || sym}\nPRICE: $${priceUsd.toLocaleString()}\n24H CHANGE: ${change24h.toFixed(2)}%\nMARKET CAP: $${(cap / 1e6).toFixed(1)}M\n24H VOLUME: $${(vol / 1e6).toFixed(1)}M\n\nRespond with ONLY JSON:\n{"verdict":"POSITIVE"|"NEUTRAL"|"CAUTION","confidence":<0-100>,"bullScore":<0-100>,"bearScore":<0-100>,"script":"<150-220 word spoken script ending with a reminder to do your own research>"}` },
     ], QWEN_MODELS.script, 1800)
 
     const j = extractJson(scriptRes) || {}
-    const verdict = ['BUY', 'HOLD', 'AVOID'].includes(String(j.verdict).toUpperCase()) ? String(j.verdict).toUpperCase() : 'HOLD'
+    const verdict = stanceKey(j.verdict)
     const confidence = clampScore(firstNum(j.confidence, 60))
     const bullScore = clampScore(firstNum(j.bullScore, 50))
     const bearScore = clampScore(firstNum(j.bearScore, 50))
@@ -837,8 +902,8 @@ router.post('/script', async (req, res) => {
       const dir = change24h >= 0 ? 'up' : 'down'
       scriptText = `${live.name || sym} is trading at $${priceUsd.toLocaleString()}, ${dir} ${change24h.toFixed(2)}% over 24 hours, with a market cap near $${(cap / 1e6).toFixed(1)}M. The bull case rests on momentum, while the bear case weighs mean-reversion risk. Balance growth potential against risk.`
     }
-    if (!scriptText.toLowerCase().includes('not financial advice')) {
-      scriptText += '\n\nThis is not financial advice. Trade the evidence, not the noise.'
+    if (!/own research|not financial advice/i.test(scriptText)) {
+      scriptText += '\n\nThis is not financial advice. Do your own research — trade the evidence, not the noise.'
     }
 
     const data = {
@@ -849,13 +914,13 @@ router.post('/script', async (req, res) => {
       bullScore,
       bearScore,
       script: scriptText,
-      tone: verdict === 'BUY' ? 'confident and steady' : verdict === 'HOLD' ? 'measured and calm' : 'firm and cautionary',
+      tone: verdict === 'POSITIVE' ? 'confident and steady' : verdict === 'CAUTION' ? 'firm and cautionary' : 'measured and calm',
       duration: Math.max(30, Math.round(scriptText.length / 3)),
       wordCount: scriptText.split(/\s+/).length,
       artDirection: {
-        BUY: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
-        HOLD: { palette: ['#5b93ff', '#a78bfa', '#64748b'], motif: 'Balanced scales of light suspended above a glowing market grid, calm, cinematic' },
-        AVOID: { palette: ['#f87171', '#5b93ff', '#334155'], motif: 'Red bear chains wrapped around a fracturing coin, dramatic shadows, warning mood' },
+        POSITIVE: { palette: ['#5b93ff', '#34d399', '#0ea5e9'], motif: 'Golden bull ascending through a storm of candlesticks, heroic, premium fintech lighting' },
+        NEUTRAL: { palette: ['#5b93ff', '#a78bfa', '#64748b'], motif: 'Balanced scales of light suspended above a glowing market grid, calm, cinematic' },
+        CAUTION: { palette: ['#f87171', '#5b93ff', '#334155'], motif: 'Red bear chains wrapped around a fracturing coin, dramatic shadows, warning mood' },
       }[verdict],
       asOf: new Date().toISOString(),
     }
@@ -873,18 +938,10 @@ router.post('/script', async (req, res) => {
 // ── Final recommendation: one master pass over every other agent ──
 // The client gathers each agent in parallel and hands the payloads here, so this
 // route never re-fetches: it compresses what arrived and makes ONE model call.
-const FINAL_STANCES = [
-  'SPECULATIVE ACCUMULATE',
-  'WAIT FOR CONFIRMATION',
-  'HOLD & MONITOR',
-  'REDUCE EXPOSURE',
-  'AVOID NEW CAPITAL',
-]
-
 function stanceTone(stance) {
-  const s = String(stance).toUpperCase()
-  if (s.includes('ACCUMULATE')) return 'up'
-  if (s.includes('REDUCE') || s.includes('AVOID')) return 'down'
+  const s = stanceKey(stance)
+  if (s === 'POSITIVE') return 'up'
+  if (s === 'CAUTION') return 'down'
   return 'flat'
 }
 
@@ -1001,14 +1058,16 @@ YOUR JOB: reconcile all of it into ONE professional recommendation. Where agents
 
 HARD RULES:
 - NEVER say "buy", "don't buy", "sell", "go long", "go short", "invest" or any direct instruction to transact. You are an analyst framing a stance, not a signal service.
-- Pick exactly ONE stance from: ${FINAL_STANCES.join(' / ')}.
+- Pick exactly ONE research stance: POSITIVE (positives outweigh the risks) / NEUTRAL (mixed signals) / CAUTION (risks outweigh the positives).
 - Be concrete: cite the actual numbers the agents produced.
 - Never name data providers, APIs, tools or models behind any of this.
 - Write like a seasoned institutional strategist: calm, specific, no hype, no fear.
+- End "thesis" by handing the decision back to the reader: they must do their own research.
+${STANCE_RULES}
 
 Respond with ONLY one valid JSON object (no markdown, no fences):
 {
-  "stance": "<one of the allowed stances, uppercase>",
+  "stance": "POSITIVE" | "NEUTRAL" | "CAUTION",
   "conviction": <0-100>,
   "headline": "<max 12 words, the one-line house view>",
   "thesis": "<3-5 sentences reconciling every agent, naming the disagreement and your weighting>",
@@ -1035,8 +1094,9 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
     }
     if (!parsed) throw new Error('Final synthesis did not return valid JSON')
 
-    const rawStance = String(parsed.stance || '').toUpperCase().trim()
-    const stance = FINAL_STANCES.find((s) => rawStance.includes(s.split(' ')[0])) || 'HOLD & MONITOR'
+    const stance = stanceKey(parsed.stance)
+    let thesis = clip(parsed.thesis, 1400) || ''
+    if (thesis && !/own research|not financial advice/i.test(thesis)) thesis += ` ${DYOR_SHORT}`
 
     const data = {
       symbol: sym,
@@ -1047,7 +1107,7 @@ Respond with ONLY one valid JSON object (no markdown, no fences):
       tone: stanceTone(stance),
       conviction: clampScore(firstNum(parsed.conviction)),
       headline: clip(parsed.headline, 160) || `${name}: the desk is in wait-and-weigh mode.`,
-      thesis: clip(parsed.thesis, 1400) || '',
+      thesis,
       keyPoints: firstArr(parsed.keyPoints).slice(0, 6).map((k) => ({
         t: clip(typeof k === 'string' ? k : k?.t, 260),
         w: ['bull', 'bear', 'neutral'].includes(String(k?.w || '').toLowerCase()) ? String(k.w).toLowerCase() : 'neutral',

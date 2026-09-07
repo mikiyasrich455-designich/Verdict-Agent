@@ -10,6 +10,7 @@ import { motion } from 'framer-motion'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
 import { ErrorState } from '../../components/DashUI'
+import DyorNote from '../../components/DyorNote'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, LivePill, ProgressMeter, TONES,
@@ -113,7 +114,9 @@ function KolCard({ k, delay }) {
               {k.handle}
             </p>
             <MicroLabel className="mt-1.5 block">
-              {platform}{k.followers ? ` · ${k.followers} followers` : ''}
+              {platform}
+              {k.posted ? ` · ${k.posted}` : ''}
+              {k.source && k.source !== k.handle ? ` · ${k.source}` : k.host && k.host !== platform ? ` · ${k.host}` : ''}
             </MicroLabel>
           </div>
         </div>
@@ -129,6 +132,12 @@ function KolCard({ k, delay }) {
           <TonePill label={String(k.stance || 'neutral')} tone={tone} />
         </div>
       </div>
+
+      {k.title && (
+        <p className="mt-2.5 line-clamp-2 text-[11.5px] leading-snug" style={{ color: '#c3cde8' }}>
+          {k.title}{k.duration ? ` · ${k.duration}` : ''}
+        </p>
+      )}
 
       <InsightRow icon={Quote} tone={tone} title="The post" body={`“${k.quote}”`} />
 
@@ -297,8 +306,8 @@ export default function Narrative() {
           >
             <div className="grid gap-3 sm:grid-cols-2">
               {d.kols.length === 0 && (
-                <p className="col-span-full py-4 text-center text-[12px]" style={{ color: '#66739a' }}>
-                  No recent KOL posts found for {d.symbol} — try re-sweeping.
+                <p className="col-span-full px-4 py-4 text-center text-[12px] leading-relaxed" style={{ color: '#66739a' }}>
+                  {d.sentiment_summary_text || `No recent KOL posts found for ${d.symbol} — nothing is invented when the sweep comes back empty. Try re-sweeping.`}
                 </p>
               )}
               {d.kols.map((k, i) => (
@@ -351,6 +360,8 @@ export default function Narrative() {
           </PanelV2>
         </div>
       </div>
+
+      <DyorNote />
     </div>
   )
 }

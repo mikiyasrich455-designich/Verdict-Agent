@@ -20,6 +20,7 @@ import { liveInsights } from './synthesis.js'
 import { resolveCaInBody, resolveCaInList } from '../lib/caGuard.js'
 import { shortAddr } from '../lib/tokenResolver.js'
 import { callLLM, extractJsonLite, QWEN_MODELS } from '../lib/llm.js'
+import { stanceKey } from '../lib/stance.js'
 import { unwrapRyo } from '../lib/normalizers.js'
 import { cmcQuote } from '../lib/marketData.js'
 
@@ -335,7 +336,7 @@ Respond with ONLY a valid JSON object (no markdown, no code fences, no prose):
   "tokens": [
     {
       "symbol": "<SYMBOL>",
-      "verdict": "BUY" | "HOLD" | "AVOID",
+      "verdict": "POSITIVE" | "NEUTRAL" | "CAUTION",
       "confidence": <0-100 integer>,
       "scores": { "technical": <0-100>, "market": <0-100>, "risk": <0-100>, "catalyst": <0-100>, "sentiment": <0-100> },
       "reason": "<2 sentences explaining this token's rank and conviction>"
@@ -383,7 +384,7 @@ RULES:
           marketCap: Number(live.marketCap) || 0,
           volume24h: Number(live.volume24h) || 0,
           volatility,
-          verdict: ['BUY', 'HOLD', 'AVOID'].includes(String(t.verdict || '').toUpperCase()) ? String(t.verdict).toUpperCase() : 'HOLD',
+          verdict: stanceKey(t.verdict),
           confidence: clampScore(Number(t.confidence)),
           scores: {
             technical: pillar('technical'),
@@ -460,8 +461,9 @@ router.post('/narrative', async (req, res) => {
       return res.json(cached)
     }
 
-    // Use real KOL discovery instead of mock normalizeNarrative
-    const data = await discoverKols(symbol)
+    // Use real KOL discovery instead of mock normalizeNarrative.
+    // Pass the live token identity so news can be fact-checked against real numbers.
+    const data = await discoverKols(symbol, req.tokenIdentity)
     data.symbol = symbol.toUpperCase()
 
     const out = withLiveIdentity(data, req.tokenIdentity)

@@ -13,6 +13,8 @@ import {
   fetchMarketOverview, fetchSentimentShift, fetchFinal,
 } from '../../lib/api'
 import { ErrorState, fmtUsd } from '../../components/DashUI'
+import DyorNote from '../../components/DyorNote'
+import { stanceOf } from '../../lib/stance'
 import {
   PanelV2, MicroLabel, ProgressMeter, Ring, TONES,
 } from '../../components/ConsoleUI'
@@ -31,6 +33,25 @@ const AGENTS = [
 
 const POINT_TONE = { bull: 'up', bear: 'down', neutral: 'blue' }
 const WEIGHT_TONE = { high: 'amber', medium: 'blue', low: 'violet' }
+
+// The master desk answers with a free-form phrase ("WAIT FOR CONFIRMATION",
+// "HOLD & MONITOR", …). Fold those into the safe stance vocabulary so the hero
+// headline never reads as an instruction, while keeping the same intent.
+const DESK_STANCE_WORDS = [
+  ['SPECULATIVE', 'POSITIVE'],
+  ['ACCUMULATE', 'POSITIVE'],
+  ['WAIT', 'NEUTRAL'],
+  ['MONITOR', 'NEUTRAL'],
+  ['HOLD', 'NEUTRAL'],
+  ['REDUCE', 'CAUTION'],
+  ['AVOID', 'CAUTION'],
+]
+
+function deskStanceOf(raw) {
+  const s = String(raw || '').toUpperCase()
+  const hit = DESK_STANCE_WORDS.find(([word]) => s.includes(word))
+  return stanceOf(hit ? hit[1] : raw)
+}
 
 function StepRow({ agent, state, index }) {
   const color = TONES[agent.tone] || TONES.blue
@@ -275,6 +296,7 @@ export default function FinalVerdict() {
   }
 
   const toneColor = TONES[result.tone] || TONES.blue
+  const deskStance = deskStanceOf(result.stance)
   const price = Number(result.priceUsd) || 0
   const change = Number(result.change24h)
 
@@ -300,8 +322,11 @@ export default function FinalVerdict() {
               className="mt-3 text-[30px] font-black uppercase leading-[1.05] tracking-[-0.02em] sm:text-[42px]"
               style={{ color: toneColor, textShadow: `0 0 44px ${toneColor}44` }}
             >
-              {result.stance}
+              {deskStance.label}
             </motion.p>
+            <p className="mx-auto mt-2.5 max-w-2xl text-[12.5px] leading-relaxed" style={{ color: '#8b98bd' }}>
+              {deskStance.blurb}
+            </p>
             <p className="mx-auto mt-4 max-w-2xl text-[15px] font-semibold leading-snug sm:text-[17px]" style={{ color: '#f4f8ff' }}>
               {result.headline}
             </p>
@@ -468,6 +493,8 @@ export default function FinalVerdict() {
         </div>
         <MicroLabel>educational analysis · not financial advice</MicroLabel>
       </div>
+
+      <DyorNote />
     </div>
   )
 }

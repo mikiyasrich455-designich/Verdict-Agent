@@ -1,12 +1,16 @@
 // SVG art generator for shareable verdict cards (fallback if Flux fails)
+import { stanceKey, stanceOf } from './stance'
+
 export function verdictArt(verdict, symbol, kind) {
   const palettes = {
-    BUY: ['#5b93ff', '#34d399', '#0ea5e9'],
-    HOLD: ['#5b93ff', '#a78bfa', '#64748b'],
-    AVOID: ['#f87171', '#5b93ff', '#334155'],
+    POSITIVE: ['#5b93ff', '#34d399', '#0ea5e9'],
+    NEUTRAL: ['#5b93ff', '#a78bfa', '#64748b'],
+    CAUTION: ['#f87171', '#5b93ff', '#334155'],
   }
-  const [a, b, c] = palettes[verdict] || palettes.HOLD
-  const icon = verdict === 'BUY' ? '▲' : verdict === 'AVOID' ? '▼' : '◆'
+  const key = stanceKey(verdict)
+  const [a, b, c] = palettes[key] || palettes.NEUTRAL
+  const icon = key === 'POSITIVE' ? '▲' : key === 'CAUTION' ? '▼' : '◆'
+  const stamp = stanceOf(verdict).tag
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
     <defs>
       <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -26,16 +30,16 @@ export function verdictArt(verdict, symbol, kind) {
     <circle cx="400" cy="180" r="70" fill="#05070f" stroke="${b}" stroke-width="1" opacity="0.8"/>
     <text x="400" y="205" font-family="Arial" font-size="64" fill="${b}" text-anchor="middle" font-weight="bold">${icon}</text>
     <text x="400" y="330" font-family="Arial" font-size="42" fill="#eef2ff" text-anchor="middle" font-weight="bold" letter-spacing="6">${symbol}</text>
-    <text x="400" y="372" font-family="Arial" font-size="24" fill="${b}" text-anchor="middle" letter-spacing="10">${verdict}${kind === 'video' ? ' · VERDICT STUDIO' : ''}</text>
-    <text x="400" y="416" font-family="Arial" font-size="13" fill="#94a3b8" text-anchor="middle" letter-spacing="3">AI-GENERATED VISUAL · NOT FINANCIAL ADVICE</text>
+    <text x="400" y="372" font-family="Arial" font-size="24" fill="${b}" text-anchor="middle" letter-spacing="10">${stamp}${kind === 'video' ? ' · VERDICT STUDIO' : ''}</text>
+    <text x="400" y="416" font-family="Arial" font-size="13" fill="#94a3b8" text-anchor="middle" letter-spacing="3">AI-GENERATED VISUAL · NOT FINANCIAL ADVICE · DO YOUR OWN RESEARCH</text>
   </svg>`
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
 }
 
 const PALETTES = {
-  BUY: ['#5b93ff', '#34d399', '#0ea5e9'],
-  HOLD: ['#5b93ff', '#a78bfa', '#64748b'],
-  AVOID: ['#f87171', '#5b93ff', '#334155'],
+  POSITIVE: ['#5b93ff', '#34d399', '#0ea5e9'],
+  NEUTRAL: ['#5b93ff', '#a78bfa', '#64748b'],
+  CAUTION: ['#f87171', '#5b93ff', '#334155'],
 }
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
@@ -54,8 +58,8 @@ function roundRect(ctx, x, y, w, h, r) {
 // Used whenever the remote image model is unavailable — never a dead screen.
 export function verdictCardPng(script) {
   const s = script || {}
-  const verdict = s.verdict || 'HOLD'
-  const [a, b] = s.artDirection?.palette?.length >= 2 ? s.artDirection.palette : (PALETTES[verdict] || PALETTES.HOLD)
+  const stance = stanceOf(s.verdict)
+  const [a, b] = s.artDirection?.palette?.length >= 2 ? s.artDirection.palette : (PALETTES[stance.key] || PALETTES.NEUTRAL)
   const symbol = String(s.symbol || 'TOKEN')
   const name = String(s.name || '')
   const confidence = num(s.confidence) ?? 50
@@ -100,7 +104,7 @@ export function verdictCardPng(script) {
 
   // verdict badge
   ctx.font = 'bold 30px Arial'
-  const badgeW = ctx.measureText(verdict).width + 56
+  const badgeW = ctx.measureText(stance.tag).width + 56
   ctx.fillStyle = `${b}22`
   ctx.strokeStyle = b
   ctx.lineWidth = 2
@@ -108,7 +112,7 @@ export function verdictCardPng(script) {
   ctx.fill()
   ctx.stroke()
   ctx.fillStyle = b
-  ctx.fillText(verdict, 400, 241)
+  ctx.fillText(stance.tag, 400, 241)
 
   if (price != null) {
     ctx.fillStyle = '#e2e8f0'
@@ -159,8 +163,8 @@ export function verdictMotionWebm(script, onStatus) {
     }
 
     const s = script || {}
-    const verdict = s.verdict || 'HOLD'
-    const [a, b] = s.artDirection?.palette?.length >= 2 ? s.artDirection.palette : (PALETTES[verdict] || PALETTES.HOLD)
+    const stance = stanceOf(s.verdict)
+    const [a, b] = s.artDirection?.palette?.length >= 2 ? s.artDirection.palette : (PALETTES[stance.key] || PALETTES.NEUTRAL)
     const symbol = String(s.symbol || 'TOKEN')
     const confidence = num(s.confidence) ?? 50
     const bull = num(s.bullScore) ?? 50
@@ -245,11 +249,11 @@ export function verdictMotionWebm(script, onStatus) {
         ctx.globalAlpha = p3
         ctx.font = `bold ${Math.round(120 * (1.4 - 0.4 * p3))}px Arial`
         ctx.fillStyle = b
-        ctx.fillText(verdict, 640, 300)
+        ctx.fillText(stance.tag, 640, 300)
         ctx.globalAlpha = 1
         ctx.fillStyle = '#64748b'
         ctx.font = '20px Arial'
-        ctx.fillText('NOT FINANCIAL ADVICE · TRADE THE EVIDENCE', 640, 660)
+        ctx.fillText('NOT FINANCIAL ADVICE · DO YOUR OWN RESEARCH', 640, 660)
       }
     }
 

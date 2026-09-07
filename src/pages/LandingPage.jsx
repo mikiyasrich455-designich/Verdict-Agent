@@ -7,6 +7,7 @@ import {
   Monitor, RefreshCw, Settings, BadgeCheck, Link2,
 } from 'lucide-react'
 import Logo from '../components/Logo'
+import { STANCES } from '../lib/stance'
 
 const AGENT_SKILLS = [
   { icon: ScanSearch, label: 'market scan' },
@@ -34,7 +35,7 @@ const STEPS = [
   {
     n: '05',
     title: 'Verdict Issued & Shared',
-    text: 'A BUY / HOLD / AVOID verdict ships with a confidence score and a shareable card the whole timeline can audit.',
+    text: `A ${STANCES.POSITIVE.tag} / ${STANCES.NEUTRAL.tag} / ${STANCES.CAUTION.tag} research stance ships with a confidence score and a shareable card the whole timeline can audit.`,
   },
 ]
 
@@ -160,7 +161,7 @@ function VerdictFilter() {
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-bold text-snow">SOL</span>
               <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold text-success bg-success/10 border border-success/30">
-                BUY
+                {STANCES.POSITIVE.tag}
               </span>
             </div>
             <span className="font-mono text-xs text-snow">82%</span>
@@ -348,7 +349,7 @@ export default function LandingPage() {
             className="hero-sub mt-8 text-[14px] md:text-[15px] font-medium max-w-lg mx-auto leading-relaxed"
           >
             Every token scored across five pillars, stress-tested by a bull
-            and a bear, and delivered as one auditable call — BUY, HOLD, or AVOID.
+            and a bear, and delivered as one auditable read — {STANCES.POSITIVE.tag}, {STANCES.NEUTRAL.tag}, or {STANCES.CAUTION.tag}.
           </motion.p>
 
           <motion.div

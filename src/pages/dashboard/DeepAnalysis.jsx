@@ -9,7 +9,9 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { fetchVerdict } from '../../lib/api'
+import { stanceOf } from '../../lib/stance'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
+import DyorNote from '../../components/DyorNote'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, ProgressMeter, TONES,
@@ -23,7 +25,8 @@ const PILLAR_LABELS = {
   sentiment: 'Sentiment Drift',
 }
 
-const VERDICT_TONE = { BUY: 'up', HOLD: 'amber', AVOID: 'down' }
+// stance.tone → ConsoleUI TONES key (same green / amber / red intent as before)
+const STANCE_TONE = { positive: 'up', neutral: 'amber', risk: 'down' }
 
 function StancePill({ label, tone }) {
   const color = TONES[tone] || TONES.blue
@@ -142,14 +145,20 @@ export default function DeepAnalysis() {
   const v = result
   const pillarEntries = Object.entries(v.scores || {})
   const strong = Object.values(v.scores).filter((p) => p.score >= 70).length
-  const verdictTone = VERDICT_TONE[v.verdict] || 'blue'
+  const stance = stanceOf(v.verdict)
+  const verdictTone = STANCE_TONE[stance.tone] || 'blue'
   const price = fmtPrice(v.priceUsd)
   const bullReasons = Array.isArray(v.bullReasons) ? v.bullReasons : []
   const bearReasons = Array.isArray(v.bearReasons) ? v.bearReasons : []
   const sources = Array.isArray(v.sources) ? v.sources.filter((s) => s?.url) : []
   const keyLevels = v.keyLevels && typeof v.keyLevels === 'object' ? v.keyLevels : {}
   const hasKeyLevels = ['support', 'resistance', 'stopLoss', 'target'].some((k) => keyLevels[k])
-  const answer = `${v.name || v.symbol} is ${v.verdict} at ${price === '—' ? 'no published price' : price}, ${fmtPct(v.change24h)} on the day. `
+  const risk = v.riskAssessment && typeof v.riskAssessment === 'object' ? v.riskAssessment : null
+  const riskMetrics = Array.isArray(risk?.metrics) ? risk.metrics : []
+  const riskDataGaps = Array.isArray(risk?.dataGaps) ? risk.dataGaps : []
+  const GRADE_TONE = { SEVERE: 'down', ELEVATED: 'down', MODERATE: 'amber', GUARDED: 'amber', CONTAINED: 'up' }
+  const sideTone = (side) => (side === 'risk' ? 'down' : side === 'positive' ? 'up' : 'amber')
+  const answer = `${v.name || v.symbol} shows ${stance.label} at ${price === '—' ? 'no published price' : price}, ${fmtPct(v.change24h)} on the day. `
     + `The model scores the bull case ${v.bullScore} against a bear case of ${v.bearScore}, with ${strong} of 5 pillars in the strong band.`
 
   return (
@@ -158,14 +167,15 @@ export default function DeepAnalysis() {
         icon={Microscope}
         kicker={`Deep analysis · ${v.symbol}`}
         answer={answer}
-        stance={<StancePill label={v.verdict} tone={verdictTone} />}
+        stance={<StancePill label={stance.label} tone={verdictTone} />}
         confidence={v.confidence}
         confidenceTone={verdictTone}
         chips={[
           `bull ${v.bullScore} · bear ${v.bearScore}`,
           `${strong} strong pillars`,
+          risk ? `structural risk ${risk.riskScore}/100 · ${risk.grade}` : null,
           `as of ${new Date(v.asOf).toLocaleTimeString()}`,
-        ]}
+        ].filter(Boolean)}
       >
         <button type="button" onClick={() => setRunKey((k) => k + 1)} className="cv-chip">
           <RefreshCw size={12} /> Re-run
@@ -189,8 +199,47 @@ export default function DeepAnalysis() {
 
       <PanelV2 icon={Activity} title="Bull vs Bear Tension" right={<MicroLabel>scored evidence</MicroLabel>} delay={0.18}>
         <ScoreBar left={v.bullScore} right={v.bearScore} leftLabel="Bull" rightLabel="Bear" leftTone="up" rightTone="down" />
-        <InsightRow icon={Microscope} tone={verdictTone} title={v.verdict} body={v.summary} />
+        <InsightRow icon={Microscope} tone={verdictTone} title={stance.label} body={v.summary} />
       </PanelV2>
+
+      {risk && (
+        <PanelV2
+          icon={ShieldAlert}
+          title="Structural Memecoin Risk Read"
+          right={<StancePill label={`${risk.grade} · risk ${risk.riskScore}/100`} tone={GRADE_TONE[risk.grade] || 'amber'} />}
+          delay={0.2}
+        >
+          <ScoreBar
+            left={risk.positivityScore}
+            right={risk.riskScore}
+            leftLabel="Positivity"
+            rightLabel="Risk"
+            leftTone="up"
+            rightTone="down"
+          />
+          {risk.gradeNote && (
+            <InsightRow icon={ShieldAlert} tone={GRADE_TONE[risk.grade] || 'amber'} title={`${risk.grade} structural grade`} body={risk.gradeNote} />
+          )}
+          <div className="mt-2 flex flex-col">
+            {riskMetrics.map((m) => (
+              <div key={m.id}>
+                <div className="cv-rowline">
+                  <span className="cv-rowline-label">{m.label}</span>
+                  <span className="cv-rowline-cell text-right font-mono text-[12px]" style={{ color: TONES[sideTone(m.side)] || TONES.blue }}>
+                    {m.value} · risk {m.score}/100
+                  </span>
+                </div>
+                <InsightRow icon={Activity} tone={sideTone(m.side)} title={m.label} body={m.text} />
+              </div>
+            ))}
+          </div>
+          {riskDataGaps.length > 0 && (
+            <p className="mt-3 font-mono text-[10.5px] leading-relaxed" style={{ color: '#66739a' }}>
+              DATA GAPS: {riskDataGaps.join(' · ')}
+            </p>
+          )}
+        </PanelV2>
+      )}
 
       <div className="cv-grid-2">
         <div className="flex min-w-0 flex-col gap-4">
@@ -299,6 +348,8 @@ export default function DeepAnalysis() {
           </PanelV2>
         </div>
       </div>
+
+      <DyorNote />
     </div>
   )
 }

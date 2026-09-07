@@ -9,7 +9,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { buildReceipt, saveReceipt } from '../../data/receipts'
 import { fetchCouncil } from '../../lib/api'
+import { stanceOf } from '../../lib/stance'
 import { ErrorState } from '../../components/DashUI'
+import DyorNote from '../../components/DyorNote'
 import { BullMascot, BearMascot } from '../../components/CouncilMascots'
 import { CouncilLoader } from '../../components/ShadcnLoaders'
 import {
@@ -21,12 +23,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // The council bench — three independent agents arguing the same tape.
 const AGENT_META = {
-  bull: { name: 'Bull advocate', desc: 'argues commitment', icon: TrendingUp, tone: 'up' },
-  bear: { name: 'Bear advocate', desc: 'argues restraint', icon: TrendingDown, tone: 'down' },
+  bull: { name: 'Bull advocate', desc: 'argues the positive case', icon: TrendingUp, tone: 'up' },
+  bear: { name: 'Bear advocate', desc: 'argues the risk case', icon: TrendingDown, tone: 'down' },
   judge: { name: 'Judge', desc: 'rules on evidence, not vibes', icon: Gavel, tone: 'amber' },
 }
 
-const VERDICT_TONE = { BUY: 'up', HOLD: 'amber', AVOID: 'down' }
+// stance.tone → ConsoleUI TONES key (same green / amber / red intent as before)
+const STANCE_TONE = { positive: 'up', neutral: 'amber', risk: 'down' }
 
 function TonePill({ label, tone }) {
   const color = TONES[tone] || TONES.blue
@@ -80,8 +83,10 @@ function DebateCard({ role, text, thinking, round }) {
 function CouncilLoading({ symbol }) {
   const steps = [
     'Reading the evidence pack',
-    'Bull advocate building the commitment case',
-    'Bear advocate building the restraint case',
+    'Round 1 · Opening cases — positivity vs risk',
+    'Round 2 · Cross-examination of both openings',
+    'Round 3 · Rebuttals — concede or refute with numbers',
+    'Round 4 · Closing statements after full scrutiny',
     'Judge weighing grounding, not vibes',
   ]
   return (
@@ -93,7 +98,7 @@ function CouncilLoading({ symbol }) {
       <div className="cv-panel flex flex-col items-center px-6 py-9">
         <CouncilLoader label={`The council is reading the evidence pack for ${symbol}`} />
         <div className="mt-6 w-full max-w-md">
-          <ProgressMeter label="Evidence → opening cases → cross-examination → ruling" tone="blue" />
+          <ProgressMeter label="Evidence → openings → cross-exams → rebuttals → closings → ruling" tone="blue" />
         </div>
         <div className="mt-5 grid gap-x-8 gap-y-1.5 text-center sm:grid-cols-2">
           {steps.map((s) => (
@@ -203,9 +208,16 @@ export default function Council() {
   const bull100 = Math.round((judge?.bullScore ?? 0) * 100)
   const bear100 = Math.round((judge?.bearScore ?? 0) * 100)
   const decisive = judge ? Math.abs(judge.diff) > judge.threshold : false
-  const verdictTone = VERDICT_TONE[judge?.verdict] || 'blue'
+  const stance = stanceOf(judge?.verdict)
+  const verdictTone = STANCE_TONE[stance.tone] || 'blue'
   const conf = typeof judge?.confidence === 'number' ? Math.round(judge.confidence) : null
-  const roundOf = (i) => (i < 2 ? 'Round 1 · Opening' : 'Round 2 · Cross-examination')
+  const roundOf = (i) => (i < 2
+    ? 'Round 1 · Opening'
+    : i < 4
+      ? 'Round 2 · Cross-examination'
+      : i < 6
+        ? 'Round 3 · Rebuttal'
+        : 'Round 4 · Closing')
 
   return (
     <div className="flex flex-col gap-4">
@@ -248,10 +260,10 @@ export default function Council() {
         className="cv-panel flex items-center justify-between gap-4 px-5 py-4"
       >
         <div className="flex items-center gap-3">
-          <BullMascot size={44} hype={typing === 'bull' || (judged && judge?.verdict === 'BUY')} />
+          <BullMascot size={44} hype={typing === 'bull' || (judged && stance.key === 'POSITIVE')} />
           <div>
             <p className="text-[12.5px] font-bold leading-none" style={{ color: TONES.up }}>BULL</p>
-            <MicroLabel className="mt-1.5 block">argues commitment</MicroLabel>
+            <MicroLabel className="mt-1.5 block">argues the positives</MicroLabel>
           </div>
         </div>
         <div className="flex flex-col items-center">
@@ -263,9 +275,9 @@ export default function Council() {
         <div className="flex items-center gap-3 text-right">
           <div>
             <p className="text-[12.5px] font-bold leading-none" style={{ color: TONES.down }}>BEAR</p>
-            <MicroLabel className="mt-1.5 block">argues restraint</MicroLabel>
+            <MicroLabel className="mt-1.5 block">argues the risks</MicroLabel>
           </div>
-          <BearMascot size={44} hype={typing === 'bear' || (judged && judge?.verdict === 'AVOID')} />
+          <BearMascot size={44} hype={typing === 'bear' || (judged && stance.key === 'CAUTION')} />
         </div>
       </motion.div>
 
@@ -274,8 +286,8 @@ export default function Council() {
         <AnswerBanner
           icon={Gavel}
           kicker={`Council ruling · ${data.symbol}`}
-          answer={`The council rules ${judge.verdict} on ${data.symbol}${data.name && data.name !== data.symbol ? ` (${data.name})` : ''} — bull case ${bull100} vs bear case ${bear100} on evidence grounding.`}
-          stance={<TonePill label={judge.verdict} tone={verdictTone} />}
+          answer={`The council's read on ${data.symbol}${data.name && data.name !== data.symbol ? ` (${data.name})` : ''} is ${stance.label} — bull case ${bull100} vs bear case ${bear100} on evidence grounding.`}
+          stance={<TonePill label={stance.label} tone={verdictTone} />}
           confidence={conf}
           confidenceTone={verdictTone}
           chips={[
@@ -290,7 +302,7 @@ export default function Council() {
           answer={`The council is mid-debate on ${data.symbol} — ${visible} of ${messages.length} arguments heard so far. The judge rules once both advocates have finished.`}
           stance={<TonePill label="In session" tone="amber" />}
           confidence={null}
-          chips={['Bull argues commitment', 'Bear argues restraint']}
+          chips={['Bull argues the positives', 'Bear argues the risks']}
         />
       )}
 
@@ -322,7 +334,7 @@ export default function Council() {
 
       {/* ── the judge's ruling ── */}
       {judged ? (
-        <PanelV2 icon={Gavel} title="Judge Ruling" right={<TonePill label={judge.verdict} tone={verdictTone} />} delay={0.18}>
+        <PanelV2 icon={Gavel} title="Judge Ruling" right={<TonePill label={stance.label} tone={verdictTone} />} delay={0.18}>
           <ScoreBar
             left={judge.bullScore * 100}
             right={judge.bearScore * 100}
@@ -392,6 +404,8 @@ export default function Council() {
           })}
         </div>
       </PanelV2>
+
+      <DyorNote />
     </div>
   )
 }

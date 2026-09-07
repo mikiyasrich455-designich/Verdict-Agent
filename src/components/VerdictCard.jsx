@@ -4,6 +4,7 @@ import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } fro
 import Logo from './Logo'
 import VerdictBadge, { verdictColor } from './VerdictBadge'
 import ScoreBar from './ScoreBar'
+import { stanceOf } from '../lib/stance'
 
 export const POINT_LABELS = {
   technical: 'Technical Health',
@@ -133,7 +134,7 @@ const ShareCard = forwardRef(function ShareCard({ data }, ref) {
           </div>
         </div>
         <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '0.12em', color: verdictColor(data.verdict) }}>
-          {data.verdict}
+          {stanceOf(data.verdict).tag}
         </span>
       </div>
 

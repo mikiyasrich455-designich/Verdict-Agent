@@ -1,4 +1,4 @@
-// Risk Desk agent — the Buy-the-Dip discipline layer.
+// Risk Desk agent — the dip-entry discipline layer.
 // User tunes limits with sliders; the desk returns signal checks and
 // a sized entry / stop / target plan built from ATR.
 import { useEffect, useState } from 'react'
@@ -180,7 +180,7 @@ export default function RiskDesk() {
         kicker={`Risk desk · ${d.symbol} · $10,000 practice account`}
         answer={
           d.qualified
-            ? `${d.symbol} qualifies for the dip buy — ${passed}/${signals.length} conviction gates cleared. The plan enters at ${fmtUsd(p.entry)}, stops at ${fmtUsd(p.stop)} (${d.limits.stopLoss}% away) and targets ${fmtUsd(p.target)}, sizing ${fmtUsd(p.sizeUsd)} so only ${fmtUsd(p.riskUsd)} is at risk for ${p.rr}R.`
+            ? `${d.symbol} qualifies for the dip-entry plan — ${passed}/${signals.length} conviction gates cleared. The plan enters at ${fmtUsd(p.entry)}, stops at ${fmtUsd(p.stop)} (${d.limits.stopLoss}% away) and targets ${fmtUsd(p.target)}, sizing ${fmtUsd(p.sizeUsd)} so only ${fmtUsd(p.riskUsd)} is at risk for ${p.rr}R.`
             : `${d.symbol} is refused — ${failed.length} of ${signals.length} conviction gates failed${failed.length ? ` (${failed.map((f) => f.label).join(', ')})` : ''}. The desk still sizes the plan (entry ${fmtUsd(p.entry)}, stop ${fmtUsd(p.stop)}, target ${fmtUsd(p.target)}) but no position opens until every gate clears.`
         }
         stance={<StancePill label={d.qualified ? 'position qualified' : 'position rejected'} tone={tone} />}

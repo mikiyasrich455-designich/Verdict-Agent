@@ -8,19 +8,22 @@ import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PanelV2, Ring, TONES, TokenLogo, LivePill } from '../../components/ConsoleUI'
 import { fetchStudioScript, generateStudioVoice, fetchVerdict } from '../../lib/api'
+import { stanceOf } from '../../lib/stance'
 import { downloadDataUrl } from './StudioShared'
 
-const VERDICT_TONE = { BUY: 'up', SELL: 'down', HOLD: 'amber' }
+// Stance tone → ConsoleUI tone bridge: POSITIVE reads teal-up, NEUTRAL amber, CAUTION red-down.
+const STANCE_TONE = { positive: 'up', neutral: 'amber', risk: 'down' }
 
 function StancePill({ label }) {
-  const tone = VERDICT_TONE[String(label || '').toUpperCase()] || 'blue'
+  const stance = stanceOf(label)
+  const tone = STANCE_TONE[stance.tone] || 'blue'
   const color = TONES[tone] || TONES.blue
   return (
     <span
       className="rounded-full px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em]"
       style={{ color, background: `${color}14`, border: `1px solid ${color}55`, boxShadow: `0 0 18px ${color}33` }}
     >
-      {label}
+      {stance.label}
     </span>
   )
 }
@@ -75,7 +78,7 @@ function VoiceStudioInner({ token }) {
     try {
       const v = await fetchVerdict(token)
       const text =
-        `Verdict: ${v.verdict} on ${v.name || v.symbol}. ` +
+        `Research stance: ${stanceOf(v.verdict).label} on ${v.name || v.symbol}. ` +
         `Confidence ${v.confidence} out of 100 — bull case ${v.bullScore} against bear case ${v.bearScore}. ` +
         `${v.finalThesis || ''}`.trim()
       setScript({ symbol: v.symbol, name: v.name, verdict: v.verdict, confidence: v.confidence, bullScore: v.bullScore, bearScore: v.bearScore, script: text, fallback: true })
@@ -171,7 +174,7 @@ function VoiceStudioInner({ token }) {
           </div>
           <div className="ml-auto flex items-center gap-4">
             {typeof script?.confidence === 'number' && (
-              <Ring value={script.confidence} size={62} stroke={6} tone={VERDICT_TONE[String(script.verdict).toUpperCase()] || 'blue'} label="CONF" />
+              <Ring value={script.confidence} size={62} stroke={6} tone={STANCE_TONE[stanceOf(script.verdict).tone] || 'blue'} label="CONF" />
             )}
             <LivePill label="Live narration pipeline" />
           </div>

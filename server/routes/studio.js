@@ -164,7 +164,7 @@ router.get('/video/status/:taskId', async (req, res) => {
 // client only ever gets the finished audio + downloadable script.
 router.post('/voice', async (req, res) => {
   const start = Date.now()
-  const { text, symbol = '', verdict = 'HOLD', tone = 'neutral' } = req.body
+  const { text, symbol = '', verdict = 'NEUTRAL', tone = 'neutral' } = req.body
   if (!text) return res.status(400).json({ error: 'text required' })
 
   const limit = rateLimit('studio', 20, 60000)
@@ -176,7 +176,7 @@ router.post('/voice', async (req, res) => {
   try {
     const condensed = await callLLM([
       { role: 'system', content: 'You are a professional financial voiceover writer. Deliver ONLY the spoken text — no headings, no markdown, no stage directions, no labels.' },
-      { role: 'user', content: `Write a detailed, professional ~130-150 word market briefing from the analysis below for a clean, calm, deep male analyst. Cover it all: open with the verdict, state the key numbers (price, 24h change, market cap, volume), then explain WHY it is bullish (the growth case) and WHY it is risky (the bear case), then give one balanced rating of growth-potential versus risk. No buy/sell instructions. End with a one-line disclaimer.\n\nSYMBOL: ${symbol}\nVERDICT: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 6000)}` },
+      { role: 'user', content: `Write a detailed, professional ~130-150 word market briefing from the analysis below for a clean, calm, deep male analyst. Cover it all: open with the research stance, state the key numbers (price, 24h change, market cap, volume), then explain WHY the positives are strong (the growth case) and WHY the risks matter (the bear case), then give one balanced rating of growth-potential versus risk. Never instruct anyone to buy, hold, sell or avoid anything. End with a one-line disclaimer reminding listeners to do their own research.\n\nSYMBOL: ${symbol}\nSTANCE: ${verdict}\nTONE: ${tone}\n\nANALYSIS:\n${String(text).slice(0, 6000)}` },
     ], QWEN_MODELS.script, 600)
 
     let script = String(condensed || '').replace(/```/g, '').trim()

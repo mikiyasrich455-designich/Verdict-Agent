@@ -5,6 +5,7 @@
 import { identityForSymbol } from './activeToken'
 import { enrichProfile } from './tokenEnrich'
 import { verdictCardPng, verdictMotionWebm } from './verdictArt.js'
+import { stanceKey, stanceOf } from './stance'
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -175,11 +176,11 @@ export function fetchFinal(symbol, agents) {
 // behind the scenes from the live verdict — the user only sees CTA → result → download.
 export async function generateStudioImage(script) {
   const symbol = script?.symbol || 'TOKEN'
-  const verdict = script?.verdict || 'HOLD'
+  const stance = stanceOf(script?.verdict)
   const confidence = script?.confidence ?? 50
   const bull = script?.bullScore ?? 50
   const bear = script?.bearScore ?? 50
-  const prompt = `A clean, professional crypto analysis result card rendered as a dark glassmorphism financial dashboard. Deep navy background with a soft blue glow and a subtle grid. Large bold "${symbol}" ticker, a "${verdict}" verdict badge, confidence ${confidence}%, bull case ${bull} vs bear case ${bear}. Minimal, premium fintech aesthetic, crisp typography, balanced composition, no clutter.`
+  const prompt = `A clean, professional crypto analysis result card rendered as a dark glassmorphism financial dashboard. Deep navy background with a soft blue glow and a subtle grid. Large bold "${symbol}" ticker, a "${stance.tag}" research-stance badge, confidence ${confidence}%, bull case ${bull} vs bear case ${bear}. Minimal, premium fintech aesthetic, crisp typography, balanced composition, no clutter.`
 
   try {
     const res = await fetch('/api/proxy/studio/image', {
@@ -299,7 +300,7 @@ export async function generateStudioVideo(script, onStatus) {
 // behind the scenes on the server; the browser only ever receives the finished MP3.
 export async function generateStudioVoice(script, { onProgress } = {}) {
   const symbol = script?.symbol || 'TOKEN'
-  const verdict = script?.verdict || 'HOLD'
+  const verdict = stanceKey(script?.verdict)
   const tone = script?.tone || 'neutral'
   const text = String(script?.script || '')
 

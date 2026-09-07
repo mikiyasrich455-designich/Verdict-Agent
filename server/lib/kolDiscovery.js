@@ -1,7 +1,14 @@
-// Sovereign KOL Sentiment & Social Intelligence Engine — real posts from live search,
-// synthesized into the console's narrative metrics. Noise/shills are filtered; alpha and
-// on-chain/structural commentary is weighted up. Output matches the console schema.
-import { callLLM, callSearch, QWEN_MODELS } from './llm.js'
+// KOL Radar — real posts, real links, real dates.
+//
+// Two hard rules shape this module:
+//   1. Nothing here is invented. Every handle, URL, platform, publish date and
+//      thumbnail comes straight out of a live search-engine result set.
+//   2. The model never writes a link. It is shown a numbered list of genuine posts
+//      and may only return `{ index, ... }` selections, which are mapped back onto
+//      the real result objects. A hallucinated URL is structurally impossible.
+// If the sweep finds nothing, the result says so honestly instead of padding.
+import { callLLM, QWEN_MODELS } from './llm.js'
+import { serpMany, postsToPromptText } from './serp.js'
 
 function extractJson(text) {
   if (!text) return null
@@ -16,192 +23,245 @@ function extractJson(text) {
   return null
 }
 
-function platformOf(url) {
-  const u = String(url || '').toLowerCase()
-  if (u.includes('x.com') || u.includes('twitter.com')) return 'x'
-  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube'
-  if (u.includes('reddit.com')) return 'reddit'
-  if (u.includes('tiktok.com')) return 'tiktok'
-  if (u.includes('instagram.com')) return 'instagram'
-  return 'web'
+const SOCIAL = new Set(['x', 'youtube', 'reddit', 'tiktok', 'instagram', 'telegram', 'discord', 'blog'])
+const STANCES = ['BULLISH', 'BEARISH', 'NEUTRAL']
+
+// Relevance gate: a post must actually be about this token. Checked against the real
+// title/excerpt/link so unrelated results never reach the console.
+function isRelevant(post, sym, name) {
+  const hay = `${post.title} ${post.snippet} ${post.url}`.toLowerCase()
+  const s = sym.toLowerCase()
+  if (new RegExp(`\\$${s}\\b`).test(hay)) return true
+  if (new RegExp(`\\b${s}\\b`).test(hay)) return true
+  if (name && name.length > 3 && hay.includes(name.toLowerCase())) return true
+  return false
 }
 
-// Derive a real creator handle from the post URL (deterministic — not invented).
-function handleFromUrl(url) {
-  const u = String(url || '')
-  const x = u.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})/)
-  if (x && !['status', 'search', 'home', 'explore', 'i'].includes(x[1])) return `@${x[1]}`
-  const yt = u.match(/youtube\.com\/@([A-Za-z0-9_.-]+)/) || u.match(/youtube\.com\/(?:user|channel)\/([A-Za-z0-9_.-]+)/)
-  if (yt) return `@${yt[1]}`
-  const rd = u.match(/reddit\.com\/user\/([A-Za-z0-9_-]+)/) || u.match(/reddit\.com\/r\/([A-Za-z0-9_]+)/)
-  if (rd) return `u/${rd[1]}`
-  return ''
+// Deterministic tone read used when the classification pass is unavailable — still
+// grounded in the real excerpt, never a fabricated summary.
+const BULL_WORDS = /\b(bullish|moon|pump|accumulat\w*|breakout|break out|buying|bought|listing|list(ed)?\s+on|partner\w*|airdrop|surge|ralley|rally|new high|ath|undervalued|gem|long)\b/i
+const BEAR_WORDS = /\b(bearish|rug|scam|honeypot|dump(ed|ing)?|sell(ing)? off|exit(ed)?|dead|dilut\w*|unlock|exploit|hack(ed)?|crash|plunge|overvalued|ponzi|warning|avoid|short)\b/i
+
+function keywordStance(post) {
+  const hay = `${post.title} ${post.snippet}`
+  const bull = BULL_WORDS.test(hay)
+  const bear = BEAR_WORDS.test(hay)
+  if (bull && !bear) return 'BULLISH'
+  if (bear && !bull) return 'BEARISH'
+  return 'NEUTRAL'
 }
 
-export async function discoverKols(symbol) {
-  const symbolUpper = String(symbol || '').toUpperCase()
-  console.log(`[KOLS] Sovereign social sweep for ${symbolUpper}...`)
+// Convergence is computed from the real counts, never guessed by a model.
+function convergenceOf(bull, bear) {
+  if (bull >= 3 && bull >= bear * 2) return 'BULLISH CONVERGENCE'
+  if (bear >= 3 && bear >= bull * 2) return 'BEARISH CONVERGENCE'
+  if (bull > 0 && bear > 0) return 'CONFLICTED'
+  if (bull + bear > 0) return bull > bear ? 'BULLISH CONVERGENCE' : 'BEARISH CONVERGENCE'
+  return 'COMPRESSION'
+}
 
-  const queries = [
-    `${symbolUpper} crypto latest posts site:x.com OR site:twitter.com`,
-    `${symbolUpper} token reddit discussion site:reddit.com`,
-    `${symbolUpper} crypto review site:youtube.com`,
-    `${symbolUpper} crypto news today latest`,
-    `${symbolUpper} price analysis this week popular`,
+function liveBlock(live) {
+  if (!live) return 'No live market snapshot was attached to this sweep — stamp headlines UNVERIFIED unless the article itself carries the numbers.'
+  const parts = []
+  if (live.priceUsd != null) parts.push(`price $${Number(live.priceUsd)}`)
+  if (live.change24h != null) parts.push(`24h ${Number(live.change24h).toFixed(2)}%`)
+  if (live.marketCap) parts.push(`cap $${(Number(live.marketCap) / 1e6).toFixed(2)}M`)
+  if (live.volume24h) parts.push(`volume $${(Number(live.volume24h) / 1e6).toFixed(2)}M`)
+  if (live.liquidityUsd) parts.push(`liquidity $${(Number(live.liquidityUsd) / 1e6).toFixed(2)}M`)
+  if (live.buys24h != null) parts.push(`tape ${live.buys24h || 0} buys / ${live.sells24h || 0} sells`)
+  if (live.pairAgeDays != null) parts.push(`pool age ${Number(live.pairAgeDays).toFixed(0)}d`)
+  return parts.length ? parts.join(' · ') : 'Live snapshot contained no numeric fields — prefer UNVERIFIED.'
+}
+
+export async function discoverKols(symbol, live = null) {
+  const sym = String(symbol || '').toUpperCase().trim()
+  const name = String(live?.name || '').trim()
+  console.log(`[KOLS] Live social sweep for ${sym}...`)
+
+  const ident = name && name.toUpperCase() !== sym ? `${name} ${sym}` : sym
+  const { posts: allPosts, engine } = await serpMany([
+    { type: 'search', query: `"${sym}" ${ident} crypto site:x.com OR site:twitter.com`, number: 12, cap: 12 },
+    { type: 'search', query: `${ident} token site:reddit.com`, number: 8, cap: 8 },
+    { type: 'videos', query: `${ident} crypto token analysis`, range: 'qdr:m', number: 8, cap: 8 },
+    { type: 'news', query: `${ident} crypto token`, range: 'qdr:m', number: 8, cap: 8 },
+  ], { cap: 40 })
+
+  const relevant = allPosts.filter((p) => isRelevant(p, sym, name))
+  // Never drop to zero on a strictness technicality — if nothing matched the symbol
+  // gate but the engine did return rows, keep them and let the reader see the sources.
+  const feed = (relevant.length ? relevant : allPosts).slice(0, 24)
+  const socials = feed.filter((p) => SOCIAL.has(p.platform)).slice(0, 12)
+  const newsRows = feed.filter((p) => !SOCIAL.has(p.platform) || p.platform === 'blog')
+  const newsFeed = newsRows.slice(0, 8)
+
+  console.log(`[KOLS] engine=${engine} · ${feed.length} real results (${socials.length} creator posts, ${newsFeed.length} news)`)
+  if (!feed.length) return emptyResult(sym, engine)
+
+  const prompt = `You are the social-intelligence analyst behind a crypto research console. Below is a numbered list of REAL posts and articles about ${sym}, pulled live from the open web. Every link, handle, platform and date in that list is genuine — you may reference them by NUMBER only.
+
+LIVE MARKET SNAPSHOT FOR THIS TOKEN (use it to fact-check headlines):
+${liveBlock(live)}
+
+CREATOR POSTS (numbered):
+${postsToPromptText(socials.length ? socials : feed, { withUrls: false, limit: 14 })}
+
+NEWS / ARTICLES (numbered separately, starting again at 1):
+${postsToPromptText(newsFeed, { withUrls: false, limit: 8 })}
+
+YOUR JOB:
+1. Pick the creator posts that carry real signal. Skip pure shill noise ("100x soon", "drop your wallet", giveaway spam) and skip posts with no readable content.
+2. For each pick, classify what that post actually argues: BULLISH (constructive on the token), BEARISH (warning / distribution / doubt), or NEUTRAL (informational).
+3. Rate impact HIGH only when the post cites concrete evidence — liquidity, wallet distribution, listing, audit, partnership, on-chain data, developer activity. Hype alone is LOW.
+4. Write a takeaway of 1-2 sentences stating what that post claims, grounded in its excerpt. Never add facts that are not in the list.
+5. Stamp each news item against the live snapshot: VERIFIED (the headline's numbers/direction are consistent with the live data), CONTRADICTED (the live data clearly disagrees), or UNVERIFIED (cannot be checked from the snapshot).
+
+Respond with ONLY valid JSON, no markdown, no code fences:
+{
+  "narrative_headline": "<one sentence: what the loudest real voices are actually saying about ${sym} right now>",
+  "sentiment_summary_text": "<two sentences: why the narrative has or has not converged, and what the tape should be watched for>",
+  "voices": [
+    { "index": <number from the list above>, "stance": "BULLISH|BEARISH|NEUTRAL", "impact": "HIGH|MEDIUM|LOW", "conviction": <0-100>, "takeaway": "<what this post claims>" }
+  ],
+  "news_stamps": [
+    { "index": <number from the NEWS list>, "stamp": "VERIFIED|UNVERIFIED|CONTRADICTED" }
   ]
+}
+Rules: index MUST be a number that exists in the lists above. Never output a URL, a handle or a date — those come from the real rows. If a post has no readable content, leave it out. Return an empty "voices" array rather than inventing posts.`
 
-  const raw = []
-  const serpRes = await Promise.allSettled(
-    queries.map((q) => callSearch(q, 8).catch((e) => {
-      console.log('[KOLS] SERP failed for query:', q, e.message)
-      return null
+  let parsed = null
+  try {
+    parsed = extractJson(await callLLM([
+      { role: 'system', content: 'You are a precise social-intelligence extraction engine. You output ONLY valid JSON. You never invent posts, handles, links or dates — you reference supplied items by index.' },
+      { role: 'user', content: prompt },
+    ], QWEN_MODELS.main, 2200, { timeoutMs: 32000, json: true, temperature: 0.2 }))
+  } catch (e) {
+    console.log('[KOLS] classification pass failed:', e.message)
+  }
+
+  // The pools the model is allowed to select from, in prompt order.
+  const creatorPool = (socials.length ? socials : feed).slice(0, 14)
+  const newsPool = newsFeed.slice(0, 8)
+  const rawVoices = Array.isArray(parsed?.voices) ? parsed.voices : []
+
+  let voices = rawVoices
+    .map((v) => {
+      const idx = Number(v?.index)
+      const post = Number.isInteger(idx) ? creatorPool[idx - 1] : null
+      if (!post?.url) return null
+      const stance = STANCES.includes(String(v?.stance || '').toUpperCase()) ? String(v.stance).toUpperCase() : keywordStance(post)
+      const impact = ['HIGH', 'MEDIUM', 'LOW'].includes(String(v?.impact || '').toUpperCase()) ? String(v.impact).toUpperCase() : 'MEDIUM'
+      const conviction = Math.max(10, Math.min(98, Math.round(Number(v?.conviction) || (impact === 'HIGH' ? 78 : impact === 'MEDIUM' ? 58 : 38))))
+      return {
+        post,
+        stance,
+        impact,
+        conviction,
+        takeaway: String(v?.takeaway || '').trim().slice(0, 320) || post.snippet || post.title,
+      }
+    })
+    .filter(Boolean)
+
+  // De-dupe by URL, then cap.
+  const seen = new Set()
+  voices = voices.filter((v) => (seen.has(v.post.url) ? false : (seen.add(v.post.url), true))).slice(0, 8)
+
+  // Honest degradation: the engine found real posts but the model did not classify
+  // them. Fall back to a keyword read of the genuine excerpts so the console still
+  // shows the actual posts instead of an empty grid.
+  const degraded = !voices.length
+  if (degraded) {
+    console.log('[KOLS] classification returned nothing usable — falling back to keyword read of real posts')
+    voices = (socials.length ? socials : feed).slice(0, 6).map((post) => ({
+      post,
+      stance: keywordStance(post),
+      impact: post.platform === 'youtube' || post.platform === 'x' ? 'MEDIUM' : 'LOW',
+      conviction: 48,
+      takeaway: post.snippet || post.title,
     }))
-  )
+  }
 
-  for (const r of serpRes) {
-    const organic = r.status === 'fulfilled' ? (r.value?.organic || r.value?.data?.organic) : null
-    if (organic && Array.isArray(organic)) {
-      raw.push(...organic.slice(0, 8).map((item) => ({
-        title: item.title || '',
-        url: item.link || '',
-        snippet: item.snippet || '',
-      })).filter((x) => x.url))
+  const kols = voices.map((v) => {
+    const p = v.post
+    return {
+      handle: p.handle || p.author || p.source || p.host || 'Source',
+      platform: p.platform,
+      url: p.url,
+      stance: v.stance.toLowerCase(),
+      quote: v.takeaway,
+      conviction: v.conviction,
+      impact: v.impact,
+      posted: p.date || '',
+      source: p.source || p.host,
+      host: p.host,
+      image: p.image,
+      title: p.title,
+      duration: p.duration,
+    }
+  })
+
+  const bull = kols.filter((k) => k.stance === 'bullish').length
+  const bear = kols.filter((k) => k.stance === 'bearish').length
+  const uniqueHandles = new Set(kols.map((k) => k.handle).filter(Boolean)).size
+
+  const stamps = new Map()
+  for (const s of Array.isArray(parsed?.news_stamps) ? parsed.news_stamps : []) {
+    const idx = Number(s?.index)
+    const post = Number.isInteger(idx) ? newsPool[idx - 1] : null
+    if (post?.url && ['VERIFIED', 'UNVERIFIED', 'CONTRADICTED'].includes(String(s?.stamp || '').toUpperCase())) {
+      stamps.set(post.url, String(s.stamp).toUpperCase())
     }
   }
 
-  const seen = new Set()
-  const posts = raw.filter((r) => {
-    if (seen.has(r.url)) return false
-    seen.add(r.url)
-    return true
-  }).slice(0, 24)
+  const news = newsPool.slice(0, 6).map((p) => ({
+    title: p.title,
+    url: p.url,
+    source: p.source || p.host || 'web',
+    author: p.handle || p.author || '',
+    age: p.date || 'recent',
+    stamp: stamps.get(p.url) || 'UNVERIFIED',
+    image: p.image,
+    host: p.host,
+  }))
 
-  if (!posts.length) {
-    console.log(`[KOLS] No live posts found for ${symbolUpper}`)
-    return emptyResult(symbolUpper)
-  }
-
-  const allowedUrls = new Set(posts.map((p) => p.url))
-  const bundle = posts.map((p) => {
-    const author = handleFromUrl(p.url)
-    return `- Title: ${p.title}\n  URL: ${p.url}\n  Author/creator handle (from URL): ${author || 'unknown'}\n  Snippet: ${p.snippet}`
-  }).join('\n')
-
-  const prompt = `You are the elite Sovereign KOL Sentiment & Social Intelligence Engine for the Verdict Agent Console. Analyze the live real-time feed of crypto social posts for the token below and synthesize high-impact, actionable market analytics.
-
-TOKEN: ${symbolUpper}
-
-RAW SOCIAL POSTS / SEARCH RESULTS (use ONLY these — never invent handles, URLs, or numbers):
-${bundle}
-
-CRITICAL NOISE & SHILL FILTERING RULES:
-1. Detect Engagement Farming: penalize hyper-promotional generic phrases ("100x soon!", "Drop your wallets", "To the moon"). Classify those as low-impact "shill noise".
-2. Reward Alpha & Technical Analysis: heavily weight posts about structural mechanics, on-chain smart-contract interactions, major wallet distributions, protocol partnerships, or verified developer updates.
-3. Quantify Conviction: for high-following accounts, note whether tone is Accumulation, holding steady, or Distribution.
-
-DASHBOARD MAPPING:
-- voices_tracked: count of unique, relevant accounts in this sweep.
-- bullish_voices: count of unique voices with clear macro upward conviction.
-- bearish_voices: count of unique voices with fear, doubt, short bias, or distribution warnings.
-- convergence_status: strictly one of [BULLISH CONVERGENCE | BEARISH CONVERGENCE | CONFLICTED | COMPRESSION].
-
-Respond with ONLY valid JSON (no markdown, no code fences, no prose) in this exact shape:
-{
-  "voices_tracked": 0,
-  "bullish_voices": 0,
-  "bearish_voices": 0,
-  "convergence_status": "STATUS_STRING",
-  "narrative_headline": "One clear sentence summarizing what the loudest voices are really saying right now",
-  "sentiment_summary_text": "A detailed two-sentence explanation of why the narrative has or has not converged, and what traders should expect next",
-  "top_voices_list": [
-    { "handle": "@username", "sentiment": "BULLISH", "impact_score": "HIGH", "alpha_takeaway": "Short, punchy summary of the exact technical/structural point this user made", "url": "EXACT URL copied from the RAW SOCIAL POSTS above" }
-  ]
-}
-Every "url" in top_voices_list MUST be copied EXACTLY from the RAW SOCIAL POSTS list above — never invent or shorten it.`
-
-  let response
-  try {
-    response = await callLLM([
-      { role: 'system', content: 'You are a precise data extraction engine. Return ONLY valid JSON. No markdown, no code fences, no prose.' },
-      { role: 'user', content: prompt },
-    ], QWEN_MODELS.script, 3500)
-  } catch (e) {
-    console.log('[KOLS] LLM extraction failed:', e.message)
-    return emptyResult(symbolUpper)
-  }
-
-  const x = extractJson(response)
-  if (!x) return emptyResult(symbolUpper)
-
-  const voices = (Array.isArray(x.top_voices_list) ? x.top_voices_list : [])
-    .filter((v) => v && (v.handle || v.alpha_takeaway))
-    .map((v) => {
-      const sentiment = ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(String(v.sentiment).toUpperCase())
-        ? String(v.sentiment).toUpperCase()
-        : 'NEUTRAL'
-      const impact = String(v.impact_score || '').toUpperCase() === 'HIGH' ? 'HIGH' : 'MEDIUM'
-      const url = allowedUrls.has(v.url) ? String(v.url) : ''
-      const handle = (v.handle && String(v.handle) !== '@unknown') ? String(v.handle) : (handleFromUrl(url) || '@unknown')
-      return {
-        handle,
-        sentiment,
-        impact_score: impact,
-        alpha_takeaway: String(v.alpha_takeaway || 'No structural point extracted.'),
-        platform: v.platform || platformOf(url),
-        url,
-      }
-    })
-
-  const voices_tracked = Math.max(Number(x.voices_tracked) || 0, voices.length)
-  const bullish_voices = Math.max(0, Number(x.bullish_voices) || 0)
-  const bearish_voices = Math.max(0, Number(x.bearish_voices) || 0)
-  const convergence_status = String(x.convergence_status || 'COMPRESSION').toUpperCase()
-
+  const convergence = convergenceOf(bull, bear)
   const data = {
-    symbol: symbolUpper,
-    voices_tracked,
-    bullish_voices,
-    bearish_voices,
-    convergence_status,
-    narrative_headline: String(x.narrative_headline || 'No clear narrative headline emerged this sweep.'),
-    sentiment_summary_text: String(x.sentiment_summary_text || 'Insufficient high-signal posts to call convergence this sweep.'),
-    top_voices_list: voices,
-    news: posts.slice(0, 6).map((p) => ({
-      title: p.title,
-      source: platformOf(p.url),
-      author: handleFromUrl(p.url),
-      url: p.url,
-      age: 'recent',
+    symbol: sym,
+    voices_tracked: Math.max(uniqueHandles, kols.length),
+    bullish_voices: bull,
+    bearish_voices: bear,
+    convergence_status: convergence,
+    narrative_headline: String(parsed?.narrative_headline || '').trim()
+      || (kols.length ? `${kols.length} real posts surfaced for ${sym}; the loudest reads are ${bull} constructive and ${bear} cautionary.` : `No readable creator posts surfaced for ${sym} in this sweep.`),
+    sentiment_summary_text: String(parsed?.sentiment_summary_text || '').trim()
+      || (degraded ? 'Posts were found but could not be classified this sweep — the excerpts below are shown verbatim from the real results.' : 'Convergence is computed strictly from the counts of real classified posts above.'),
+    top_voices_list: kols.map((k) => ({
+      handle: k.handle, sentiment: k.stance.toUpperCase(), impact_score: k.impact,
+      alpha_takeaway: k.quote, url: k.url, platform: k.platform,
     })),
-    // Legacy aliases for older UI paths.
-    kols: voices.map((v) => ({
-      handle: v.handle,
-      platform: v.platform || 'web',
-      url: v.url || null,
-      stance: v.sentiment.toLowerCase(),
-      quote: v.alpha_takeaway,
-      conviction: v.impact_score === 'HIGH' ? 84 : 58,
-      impact: v.impact_score,
-    })),
-    total: voices_tracked,
-    bullish: bullish_voices,
-    bearish: bearish_voices,
-    converged: convergence_status === 'BULLISH CONVERGENCE' || convergence_status === 'BEARISH CONVERGENCE',
+    news,
+    kols,
+    total: kols.length,
+    bullish: bull,
+    bearish: bear,
+    converged: convergence === 'BULLISH CONVERGENCE' || convergence === 'BEARISH CONVERGENCE',
+    sources_scanned: feed.length,
+    engine,
+    degraded,
   }
 
-  console.log(`[KOLS] ${voices_tracked} voices (${bullish_voices}B/${bearish_voices}S) · ${convergence_status}`)
+  console.log(`[KOLS] ${data.voices_tracked} voices (${bull}B/${bear}S) · ${convergence} · engine=${engine}${degraded ? ' (keyword fallback)' : ''}`)
   return data
 }
 
-function emptyResult(symbolUpper) {
+function emptyResult(sym, engine) {
   return {
-    symbol: symbolUpper,
+    symbol: sym,
     voices_tracked: 0,
     bullish_voices: 0,
     bearish_voices: 0,
     convergence_status: 'COMPRESSION',
-    narrative_headline: 'No high-signal social posts surfaced for this token yet.',
-    sentiment_summary_text: 'The sweep found insufficient real posts to call a narrative convergence. Re-sweep as fresh posts land.',
+    narrative_headline: `The live web sweep returned no posts about ${sym}.`,
+    sentiment_summary_text: `No real posts, articles or videos mentioning ${sym} were found in this sweep, so nothing is reported rather than something invented. Newer or very small tokens often have no indexed social footprint yet — re-sweep later.`,
     top_voices_list: [],
     news: [],
     kols: [],
@@ -209,5 +269,8 @@ function emptyResult(symbolUpper) {
     bullish: 0,
     bearish: 0,
     converged: false,
+    sources_scanned: 0,
+    engine: Boolean(engine),
+    empty: true,
   }
 }

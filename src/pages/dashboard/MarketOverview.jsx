@@ -9,9 +9,11 @@ import {
   TokenLogo, MicroLabel, Spark, Ring, TONES,
 } from '../../components/ConsoleUI'
 import { getStoredToken } from '../../components/DashboardShell'
+import { stanceOf } from '../../lib/stance'
 
 const REGIME_TONE = { 'risk-on': 'up', neutral: 'amber', 'risk-off': 'down' }
-const VERDICT_TONE = { BUY: 'up', HOLD: 'amber', AVOID: 'down' }
+// Stance tone → ConsoleUI tone bridge: POSITIVE reads teal-up, NEUTRAL amber, CAUTION red-down.
+const STANCE_TONE = { positive: 'up', neutral: 'amber', risk: 'down' }
 
 function StancePill({ label, tone }) {
   const color = TONES[tone] || TONES.blue
@@ -81,7 +83,8 @@ function TokenFocusStrip({ token, focus }) {
   const displaySymbol = p.symbol || focusSymbol
   const sparkPts = (p.priceHistory || []).slice(-24).map((x) => Number(x.price)).filter((n) => Number.isFinite(n))
   const upTone = Number(v.change24h) >= 0 ? 'up' : 'down'
-  const verdictTone = VERDICT_TONE[v.verdict] || 'blue'
+  const stance = stanceOf(v.verdict)
+  const verdictTone = STANCE_TONE[stance.tone] || 'blue'
   const price = fmtPrice(v.priceUsd)
 
   return (
@@ -90,7 +93,7 @@ function TokenFocusStrip({ token, focus }) {
         <div className="flex min-w-0 items-start gap-4">
           <TokenLogo src={p.logo} symbol={displaySymbol} size={48} />
           <div className="min-w-0">
-            <StancePill label={v.verdict} tone={verdictTone} />
+            <StancePill label={stance.label} tone={verdictTone} />
             <div className="mt-2.5">
               <MicroLabel>Price</MicroLabel>
               <p className="mt-1 text-2xl font-bold leading-none" style={{ color: '#f4f8ff' }}>{price === '—' ? 'no price published' : price}</p>
