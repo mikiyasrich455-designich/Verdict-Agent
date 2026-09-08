@@ -318,11 +318,11 @@ export default function TokenAnalysis() {
         transition={{ duration: 0.45, ease: 'easeOut' }}
         className="cv-panel relative overflow-hidden"
       >
-        {p.banner && (
+        {(p.banner || p.logo) && (
           <div
             aria-hidden="true"
-            className="absolute inset-0 opacity-25 bg-cover bg-center"
-            style={{ backgroundImage: `url(${p.banner})` }}
+            className={`absolute inset-0 opacity-25 bg-cover bg-center ${p.banner ? '' : 'scale-125 blur-2xl'}`}
+            style={{ backgroundImage: `url(${p.banner || p.logo})` }}
           />
         )}
         <div aria-hidden="true" className="absolute inset-0" style={{ background: 'linear-gradient(100deg, rgba(6,9,22,0.94), rgba(6,9,22,0.72) 55%, rgba(6,9,22,0.45))' }} />
