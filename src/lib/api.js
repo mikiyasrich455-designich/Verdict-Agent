@@ -117,10 +117,13 @@ function persistDiskCache() {
 
 if (typeof window !== 'undefined') loadDiskCache()
 
-function request(path, body, { ttl = 90000, label = 'Request', cacheIf, swr = false } = {}) {
+function request(path, body, { ttl = 90000, label = 'Request', cacheIf, swr = false, key: keyOverride, force = false } = {}) {
   const isGet = body === null
-  const key = isGet ? path : `${path}::${JSON.stringify(body || {})}`
-  const hit = cacheStore.get(key)
+  // Callers whose body embeds volatile payloads (timestamps, gathered agent
+  // output) pass a stable key so the SAME answer reuses the SAME cache slot.
+  // `force` skips the cache entirely for an explicit user-initiated re-run.
+  const key = keyOverride || (isGet ? path : `${path}::${JSON.stringify(body || {})}`)
+  const hit = force ? undefined : cacheStore.get(key)
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value)
 
   // Stale-while-revalidate: hand back the previous pass immediately and
@@ -175,14 +178,16 @@ function request(path, body, { ttl = 90000, label = 'Request', cacheIf, swr = fa
 }
 
 // POST /api/proxy/synthesis/verdict → Deep forensic analysis (research + live data)
-export function fetchVerdict(symbol) {
+export function fetchVerdict(symbol, opts) {
   // A degraded (data-only) verdict is never cached: the next visit retries the
   // full reasoning pass instead of pinning the weak answer to the screen.
+  // `opts.force` bypasses the speed layer for an explicit user re-run.
   return request('/api/proxy/synthesis/verdict', withIdentity({ symbol }), {
     ttl: 240000,
     label: 'Verdict',
     cacheIf: (v) => !v?.degraded,
     swr: true,
+    ...opts,
   })
 }
 
@@ -192,13 +197,13 @@ export function fetchDebate(symbol) {
 }
 
 // POST /api/proxy/synthesis/council → evidence-grounded Bull vs Bear vs Judge
-export function fetchCouncil(symbol) {
-  return request('/api/proxy/synthesis/council', withIdentity({ symbol }), { ttl: 240000, label: 'Council', swr: true })
+export function fetchCouncil(symbol, opts) {
+  return request('/api/proxy/synthesis/council', withIdentity({ symbol }), { ttl: 240000, label: 'Council', swr: true, ...opts })
 }
 
 // POST /api/proxy/ryo/market_overview → normalized overview shape
-export function fetchMarketOverview() {
-  return request('/api/proxy/ryo/market_overview', {}, { ttl: 60000, label: 'Market overview' })
+export function fetchMarketOverview(opts) {
+  return request('/api/proxy/ryo/market_overview', {}, { ttl: 60000, label: 'Market overview', ...opts })
 }
 
 // GET /api/proxy/ryo/majors → real live quotes for the console quick-start tiles
@@ -225,18 +230,18 @@ export function fetchCompare(symbols) {
 }
 
 // POST /api/proxy/ryo/sentiment_shift → normalized sentiment shape
-export function fetchSentimentShift() {
-  return request('/api/proxy/ryo/sentiment_shift', {}, { ttl: 90000, label: 'Sentiment shift' })
+export function fetchSentimentShift(opts) {
+  return request('/api/proxy/ryo/sentiment_shift', {}, { ttl: 90000, label: 'Sentiment shift', ...opts })
 }
 
 // POST /api/proxy/synthesis/narrative → normalized narrative shape
-export function fetchNarrative(symbol) {
-  return request('/api/proxy/synthesis/narrative', withIdentity({ symbol }), { ttl: 120000, label: 'Narrative', swr: true })
+export function fetchNarrative(symbol, opts) {
+  return request('/api/proxy/synthesis/narrative', withIdentity({ symbol }), { ttl: 120000, label: 'Narrative', swr: true, ...opts })
 }
 
 // POST /api/proxy/synthesis/risk → normalized risk desk shape
-export function fetchRiskDesk(symbol, limits) {
-  return request('/api/proxy/synthesis/risk', withIdentity({ symbol, limits }), { ttl: 45000, label: 'Risk desk', swr: true })
+export function fetchRiskDesk(symbol, limits, opts) {
+  return request('/api/proxy/synthesis/risk', withIdentity({ symbol, limits }), { ttl: 45000, label: 'Risk desk', swr: true, ...opts })
 }
 
 // POST /api/proxy/synthesis/script → normalized studio script shape
@@ -247,15 +252,38 @@ export function fetchStudioScript(symbol) {
 // POST /api/proxy/synthesis/final → master desk pass over every other agent's output.
 // The client gathers the agents itself (so the UI can track each one), then hands
 // the payloads over — the server never re-fetches, it just reconciles.
-export function fetchFinal(symbol, agents) {
+export function fetchFinal(symbol, agents, opts) {
   // A degraded (arithmetic) desk read is never cached: the next pass retries
   // the full judge synthesis instead of pinning the weak answer to the screen.
-  return request('/api/proxy/synthesis/final', withIdentity({ symbol, agents }), {
+  const body = withIdentity({ symbol, agents })
+  // The agents payload carries volatile timestamps, so the default body-keyed
+  // cache slot missed on every visit and re-ran the whole synthesis. Pin the
+  // slot to the token so the saved final is reused like every other page.
+  const key = `/api/proxy/synthesis/final::FINAL::${(body.ca || symbol).toUpperCase()}`
+  return request('/api/proxy/synthesis/final', body, {
     ttl: 600000,
     label: 'Final recommendation',
     cacheIf: (v) => !v?.degraded,
     swr: true,
+    key,
+    ...opts,
   })
+}
+
+// Saved-read peek: returns { value, at } straight from the cache (memory or the
+// localStorage mirror) without touching the network, so a page can render the
+// previous run's answer instantly instead of replaying the whole agent chain.
+export function peekVerdict(symbol) {
+  const key = `/api/proxy/synthesis/verdict::${JSON.stringify(withIdentity({ symbol }))}`
+  const hit = cacheStore.get(key)
+  return hit ? { value: hit.value, at: hit.at } : null
+}
+
+export function peekFinal(symbol) {
+  const body = withIdentity({ symbol })
+  const key = `/api/proxy/synthesis/final::FINAL::${(body.ca || symbol).toUpperCase()}`
+  const hit = cacheStore.get(key)
+  return hit ? { value: hit.value, at: hit.at } : null
 }
 
 // POST /api/proxy/studio/image → Qwen image (wan2.7-image). The prompt is built

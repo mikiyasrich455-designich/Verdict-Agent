@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { fetchVerdict } from '../../lib/api'
+import { fetchVerdict, peekVerdict } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
@@ -67,18 +67,31 @@ export default function DeepAnalysis() {
   const [phase, setPhase] = useState('idle') // idle | running | done
   const [result, setResult] = useState(null)
   const [runKey, setRunKey] = useState(0)
+  const forceRef = useRef(false)
 
   useEffect(() => {
     if (!token) return undefined
     let alive = true
-    setPhase('running')
-    setResult(null)
-    fetchVerdict(token).then((r) => {
+    // Saved read: a previous run for this token lives in the cache mirror —
+    // render it at once (no spinner theatre on revisit) while the fetch below
+    // silently keeps the mirror current for the next open.
+    const force = forceRef.current
+    forceRef.current = false
+    const saved = force ? null : peekVerdict(token)
+    if (saved?.value && !saved.value.error) {
+      setResult(saved.value)
+      setPhase('done')
+    } else {
+      setPhase('running')
+      setResult(null)
+    }
+    fetchVerdict(token, force ? { force: true } : undefined).then((r) => {
       if (!alive) return
       setResult(r)
       setPhase('done')
     }).catch((err) => {
       if (!alive) return
+      if (saved?.value) return // keep the saved read on a transient failure
       setResult({ error: err.message })
       setPhase('error')
     })
@@ -147,7 +160,7 @@ export default function DeepAnalysis() {
           `as of ${new Date(v.asOf).toLocaleTimeString()}`,
         ].filter(Boolean)}
       >
-        <button type="button" onClick={() => setRunKey((k) => k + 1)} className="cv-chip">
+        <button type="button" onClick={() => { forceRef.current = true; setRunKey((k) => k + 1) }} className="cv-chip">
           <RefreshCw size={12} /> Re-run
         </button>
       </AnswerBanner>

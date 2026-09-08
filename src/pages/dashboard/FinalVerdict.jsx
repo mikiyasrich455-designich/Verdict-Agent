@@ -4,13 +4,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Crown, RefreshCw, Check, X, Microscope, Swords, Radio, ShieldAlert,
-  Globe, Gauge, AlertTriangle, Zap, Target, Clock, Layers, ArrowRight,
+  Globe, Gauge, AlertTriangle, Zap, Target, Clock, Layers, ArrowRight, Download,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   fetchVerdict, fetchCouncil, fetchNarrative, fetchRiskDesk,
-  fetchMarketOverview, fetchSentimentShift, fetchFinal,
+  fetchMarketOverview, fetchSentimentShift, fetchFinal, peekFinal,
 } from '../../lib/api'
 import { ErrorState, fmtUsd } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
@@ -24,12 +24,12 @@ const DEFAULT_LIMITS = { maxPosition: 5, stopLoss: 8, minConviction: 60 }
 
 // Every agent the desk consults, in the order the user sees them checked off.
 const AGENTS = [
-  { key: 'verdict', name: 'Deep Analysis', hint: 'forensic read of the tape', icon: Microscope, tone: 'violet', run: (t) => fetchVerdict(t) },
-  { key: 'council', name: 'Bull vs Bear', hint: 'adversarial ruling', icon: Swords, tone: 'amber', run: (t) => fetchCouncil(t) },
-  { key: 'risk', name: 'Risk Desk', hint: 'gates, sizing, invalidation', icon: ShieldAlert, tone: 'blue', run: (t) => fetchRiskDesk(t, DEFAULT_LIMITS) },
-  { key: 'narrative', name: 'Narrative Radar', hint: 'voices & story flow', icon: Radio, tone: 'cyan', run: (t) => fetchNarrative(t) },
-  { key: 'overview', name: 'Market Regime', hint: 'breadth & backdrop', icon: Globe, tone: 'blue', run: () => fetchMarketOverview() },
-  { key: 'sentiment', name: 'Sentiment Shift', hint: 'rotation & mood', icon: Gauge, tone: 'cyan', run: () => fetchSentimentShift() },
+  { key: 'verdict', name: 'Deep Analysis', hint: 'forensic read of the tape', icon: Microscope, tone: 'violet', run: (t, o) => fetchVerdict(t, o) },
+  { key: 'council', name: 'Bull vs Bear', hint: 'adversarial ruling', icon: Swords, tone: 'amber', run: (t, o) => fetchCouncil(t, o) },
+  { key: 'risk', name: 'Risk Desk', hint: 'gates, sizing, invalidation', icon: ShieldAlert, tone: 'blue', run: (t, o) => fetchRiskDesk(t, DEFAULT_LIMITS, o) },
+  { key: 'narrative', name: 'Narrative Radar', hint: 'voices & story flow', icon: Radio, tone: 'cyan', run: (t, o) => fetchNarrative(t, o) },
+  { key: 'overview', name: 'Market Regime', hint: 'breadth & backdrop', icon: Globe, tone: 'blue', run: (t, o) => fetchMarketOverview(o) },
+  { key: 'sentiment', name: 'Sentiment Shift', hint: 'rotation & mood', icon: Gauge, tone: 'cyan', run: (t, o) => fetchSentimentShift(o) },
 ]
 
 const POINT_TONE = { bull: 'up', bear: 'down', neutral: 'blue' }
@@ -52,6 +52,69 @@ function deskStanceOf(raw) {
   const s = String(raw || '').toUpperCase()
   const hit = DESK_STANCE_WORDS.find(([word]) => s.includes(word))
   return stanceOf(hit ? hit[1] : raw)
+}
+
+function agoLabel(at) {
+  const mins = Math.max(0, Math.round((Date.now() - at) / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  return `${Math.round(mins / 60)}h ago`
+}
+
+// The savable final template: the whole desk process (every agent's read) plus
+// the reconciled house view, as one markdown report the user keeps or shares.
+function buildFinalReport(result, sym, savedAt) {
+  const deskStance = deskStanceOf(result.stance)
+  const price = Number(result.priceUsd) || 0
+  const change = Number(result.change24h)
+  const L = []
+  L.push(`# VERDICT · FINAL TOKEN REPORT — ${result.name || sym} (${sym})`)
+  L.push('')
+  L.push(`Master desk stance: **${deskStance.label}** · conviction ${result.conviction ?? '—'}/100 · timeframe ${result.timeframe || '—'}`)
+  if (price > 0) L.push(`Price: ${fmtUsd(price)}${Number.isFinite(change) ? ` (${change >= 0 ? '+' : ''}${change.toFixed(2)}% 24h)` : ''}`)
+  L.push(`Agents consulted: ${result.agentsUsed || '—'}${savedAt ? ` · saved read from ${agoLabel(savedAt)}` : ''}`)
+  L.push('')
+  L.push('## Final call')
+  L.push(result.headline || '—')
+  if (result.thesis) {
+    L.push('')
+    L.push('## Thesis')
+    L.push(result.thesis)
+  }
+  L.push('')
+  L.push('## Judge scores')
+  L.push(`- Bull case: ${result.bullScore ?? '—'}/100`)
+  L.push(`- Bear case: ${result.bearScore ?? '—'}/100`)
+  if (result.keyPoints?.length) {
+    L.push('')
+    L.push('## What moved the call')
+    result.keyPoints.forEach((p) => L.push(`- ${p.t}`))
+  }
+  if (result.agentDigests?.length) {
+    L.push('')
+    L.push('## The process — every agent, in one line')
+    result.agentDigests.forEach((d, i) => L.push(`${i + 1}. **${d.agent}** (${d.weight} weight): ${d.read}`))
+  }
+  if (result.risks?.length) {
+    L.push('')
+    L.push('## What breaks this stance')
+    result.risks.forEach((r) => L.push(`- ${r}`))
+  }
+  if (result.catalysts?.length) {
+    L.push('')
+    L.push('## What could accelerate it')
+    result.catalysts.forEach((c) => L.push(`- ${c}`))
+  }
+  L.push('')
+  L.push('## Levels & discipline')
+  L.push(`- Support: ${result.levels?.support || '—'}`)
+  L.push(`- Resistance: ${result.levels?.resistance || '—'}`)
+  L.push(`- Invalidation: ${result.levels?.invalidation || '—'}`)
+  if (result.sizeNote) L.push(`- Sizing note: ${result.sizeNote}`)
+  L.push('')
+  L.push('---')
+  L.push(`Generated by the Verdict agent console · ${new Date().toLocaleString()} · educational analysis, do your own research (DYOR) — not financial advice.`)
+  return L.join('\n')
 }
 
 function StepRow({ agent, state, index }) {
@@ -170,7 +233,10 @@ export default function FinalVerdict() {
   const [result, setResult] = useState(null)
   const [failed, setFailed] = useState(0)
   const [runKey, setRunKey] = useState(0)
+  const [savedAt, setSavedAt] = useState(null)
+  const [copied, setCopied] = useState(false)
   const retriedRef = useRef(false)
+  const forceRef = useRef(false)
 
   // A new token gets a fresh auto-retry budget.
   useEffect(() => { retriedRef.current = false }, [token])
@@ -184,18 +250,37 @@ export default function FinalVerdict() {
     if (!token) return undefined
     let alive = true
 
+    // Saved read: a reconciled final for this token already lives in the cache
+    // mirror — open straight onto it with every step checked off, instead of
+    // replaying the gather theatre (and a fresh synthesis) on every visit.
+    const force = forceRef.current
+    forceRef.current = false
+    if (!force) {
+      const saved = peekFinal(token)
+      if (saved?.value && !saved.value.degraded) {
+        setResult(saved.value)
+        setSteps(Object.fromEntries(AGENTS.map((a) => [a.key, 'done'])))
+        setFailed(0)
+        setSavedAt(saved.at)
+        setPhase('ready')
+        return () => { alive = false }
+      }
+    }
+
     setPhase('gathering')
     setResult(null)
     setFailed(0)
+    setSavedAt(null)
     setSteps(Object.fromEntries(AGENTS.map((a) => [a.key, 'running'])))
 
     ;(async () => {
       const collected = {}
       let misses = 0
+      const opts = force ? { force: true } : undefined
 
       await Promise.all(AGENTS.map(async (a) => {
         try {
-          const data = await a.run(token)
+          const data = await a.run(token, opts)
           if (!alive) return
           collected[a.key] = data
           setSteps((s) => ({ ...s, [a.key]: 'done' }))
@@ -216,7 +301,7 @@ export default function FinalVerdict() {
 
       setPhase('synthesizing')
       try {
-        const final = await fetchFinal(token, collected)
+        const final = await fetchFinal(token, collected, opts)
         if (!alive) return
         setResult(final)
         setPhase('ready')
@@ -253,6 +338,27 @@ export default function FinalVerdict() {
 
   const sym = token.toUpperCase()
 
+  // Save the final template: one click downloads the full report (the whole
+  // desk process + the reconciled analysis) as markdown and copies it too.
+  function saveReport() {
+    if (!result) return
+    const md = buildFinalReport(result, sym, savedAt)
+    try {
+      const blob = new Blob([md], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `VERDICT-${sym}-final-report.md`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+    } catch { /* download blocked — the clipboard copy still delivers it */ }
+    navigator.clipboard?.writeText(md)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800) })
+      .catch(() => {})
+  }
+
   const header = (
     <motion.div
       initial={{ opacity: 0, y: 14 }}
@@ -277,11 +383,21 @@ export default function FinalVerdict() {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {savedAt && phase === 'ready' && (
+          <span className="cv-chip" style={{ color: TONES.amber }}>
+            <Clock size={12} /> saved read · {agoLabel(savedAt)}
+          </span>
+        )}
         <span className="cv-chip"><Layers size={12} /> {result?.agentsUsed || settled} agents</span>
+        {result && phase === 'ready' && (
+          <button type="button" className="cv-chip" onClick={saveReport}>
+            {copied ? <Check size={12} /> : <Download size={12} />} {copied ? 'Copied' : 'Save report'}
+          </button>
+        )}
         <button
           type="button"
           className="cv-chip"
-          onClick={() => { retriedRef.current = false; setRunKey((k) => k + 1) }}
+          onClick={() => { retriedRef.current = false; forceRef.current = true; setRunKey((k) => k + 1) }}
         >
           <RefreshCw size={12} /> Re-gather
         </button>
@@ -293,7 +409,7 @@ export default function FinalVerdict() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <ErrorState error={null} onRetry={() => { retriedRef.current = false; setRunKey((k) => k + 1) }}>
+        <ErrorState error={null} onRetry={() => { retriedRef.current = false; forceRef.current = true; setRunKey((k) => k + 1) }}>
           <p className="font-mono text-[11.5px] text-faint">
             The reconcile pass for {sym} didn't land on this run (it already retried once
             behind the scenes). Every agent read you gathered is intact — run it again.
