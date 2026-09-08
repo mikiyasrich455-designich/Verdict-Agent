@@ -9,6 +9,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchNarrative } from '../../lib/api'
+import { plain } from '../../lib/text'
 import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import PercentLoader from '../../components/loaders/PercentLoader'
@@ -131,11 +132,11 @@ function KolCard({ k, delay }) {
 
       {k.title && (
         <p className="kol-title">
-          {k.title}{k.duration ? ` · ${k.duration}` : ''}
+          {plain(k.title)}{k.duration ? ` · ${k.duration}` : ''}
         </p>
       )}
 
-      {k.quote && <blockquote className="kol-quote">{`“${k.quote}”`}</blockquote>}
+      {k.quote && <blockquote className="kol-quote">{`“${plain(k.quote)}”`}</blockquote>}
 
       <div>
         <div className="kol-meter-head">
@@ -247,7 +248,7 @@ export default function Narrative() {
       <AnswerBanner
         icon={Radio}
         kicker={`KOL Radar · ${d.symbol}`}
-        answer={d.narrative_headline}
+        answer={plain(d.narrative_headline)}
         stance={<TonePill label={convergence} tone={convTone} />}
         confidence={conf}
         confidenceTone={convTone}
@@ -284,7 +285,7 @@ export default function Narrative() {
             <div className="flex flex-col gap-3">
               {d.kols.length === 0 && (
                 <p className="col-span-full px-4 py-4 text-center text-[12px] leading-relaxed" style={{ color: '#66739a' }}>
-                  {d.sentiment_summary_text || `No recent KOL posts found for ${d.symbol} — nothing is invented when the sweep comes back empty. Try re-sweeping.`}
+                  {plain(d.sentiment_summary_text) || `No recent KOL posts found for ${d.symbol} — nothing is invented when the sweep comes back empty. Try re-sweeping.`}
                 </p>
               )}
               {d.kols.map((k, i) => (
@@ -297,7 +298,7 @@ export default function Narrative() {
         {/* ── narrative read + news column ── */}
         <div className="flex min-w-0 flex-col gap-4">
           <PanelV2 icon={Radio} title="Narrative Read" delay={0.2}>
-            <InsightRow icon={Quote} tone={convTone} title={convergence} body={d.sentiment_summary_text} />
+            <InsightRow icon={Quote} tone={convTone} title={convergence} body={plain(d.sentiment_summary_text)} />
           </PanelV2>
 
           <PanelV2
@@ -309,7 +310,7 @@ export default function Narrative() {
             <div className="flex flex-col gap-2.5">
               {d.news.map((n, i) => (
                 <div key={i} className="flex flex-col gap-1.5">
-                  <SourceRow title={n.title} url={n.url} tag={n.source || 'news'} />
+                  <SourceRow title={plain(n.title)} url={n.url} tag={n.source || 'news'} />
                   <div className="flex flex-wrap items-center gap-2 px-1">
                     {n.stamp && <StampPill stamp={n.stamp} />}
                     <span className="font-mono text-[9.5px]" style={{ color: '#66739a' }}>

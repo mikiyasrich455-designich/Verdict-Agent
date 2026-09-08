@@ -15,6 +15,7 @@ import {
 import { ErrorState, fmtUsd } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import { stanceOf } from '../../lib/stance'
+import { plain, prose, asList } from '../../lib/text'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import {
   MicroLabel, ProgressMeter, Ring, TONES,
@@ -61,47 +62,8 @@ function agoLabel(at) {
   return `${Math.round(mins / 60)}h ago`
 }
 
-// LLM fields sometimes arrive with markdown / fence dressing ("**bold**",
-// "- bullets", ```json fences, raw line breaks). The desk always reads as
-// clean prose, so strip the code-ish artifacts at render time.
-function plain(v) {
-  let s = String(v ?? '')
-  s = s.replace(/```[\s\S]*?```/g, ' ')
-  s = s.replace(/`/g, '')
-  s = s.replace(/^#{1,6}\s*/gm, '')
-  s = s.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1')
-  s = s.replace(/^\s*[-*•]\s+/gm, '')
-  s = s.replace(/^\s*\d+[.)]\s+/gm, '')
-  return s.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
-}
-
-// Multi-line prose: keep paragraph breaks, drop the code-ish dressing.
-function prose(v) {
-  return String(v ?? '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/`/g, '')
-    .replace(/^#{1,6}\s*/gm, '')
-    .split(/\n+/)
-    .map((l) => l.replace(/^\s*[-*•]\s+/, '').replace(/^\s*\d+[.)]\s+/, '').trim())
-    .filter(Boolean)
-}
-
-// Normalize an LLM list field (array of strings | array of objects | one blob
-// of text) into a clean string array.
-function asList(v) {
-  if (Array.isArray(v)) {
-    return v
-      .map((x) => (x && typeof x === 'object'
-        ? plain(x.t || x.text || x.point || x.read || x.summary || '')
-        : plain(x)))
-      .filter(Boolean)
-  }
-  if (typeof v === 'string' && v.trim()) return prose(v)
-  return []
-}
-
+// The desk's agent digests arrive in a few shapes (strings, {agent,read},
+// {name,summary}) — normalize them into one clean list for the report card.
 function digestList(result) {
   return (Array.isArray(result.agentDigests) ? result.agentDigests : [])
     .map((d) => (typeof d === 'string'

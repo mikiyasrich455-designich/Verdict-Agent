@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { fetchCompare } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
+import { plain } from '../../lib/text'
 import {
   PanelV2, StatTile, AnswerBanner, InsightRow, TokenLogo, MicroLabel, TONES,
 } from '../../components/ConsoleUI'
@@ -298,7 +299,7 @@ export default function Compare() {
                             icon={ts.key === 'POSITIVE' ? TrendingUp : ts.key === 'CAUTION' ? ShieldAlert : Gauge}
                             tone={STANCE_TONE[ts.tone] || 'blue'}
                             title={`${t.symbol} — ${ts.label} at ${fmtNum(t.confidence)}/100 conviction`}
-                            body={t.reason || 'The agent returned no written reasoning for this token.'}
+                            body={plain(t.reason) || 'The agent returned no written reasoning for this token.'}
                           />
                         )
                       })}
@@ -349,7 +350,7 @@ export default function Compare() {
 
                     <PanelV2 icon={Activity} title="Comparison thesis" delay={0.23}>
                       {data.narrative ? (
-                        <p className="text-[12.5px] leading-relaxed break-words" style={{ color: '#aebfe4' }}>{data.narrative}</p>
+                        <p className="text-[12.5px] leading-relaxed break-words" style={{ color: '#aebfe4' }}>{plain(data.narrative)}</p>
                       ) : (
                         <p className="text-[12px]" style={{ color: '#66739a' }}>The agent returned no written thesis for this round.</p>
                       )}

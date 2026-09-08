@@ -14,6 +14,7 @@ import {
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchTokenProfile } from '../../lib/api'
 import { setActiveToken, tokenHref } from '../../lib/activeToken'
+import { plain } from '../../lib/text'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
   TokenLogo, MicroLabel, TONES,
@@ -346,7 +347,7 @@ export default function TokenAnalysis() {
                 </div>
                 {p.description && (
                   <p className="mt-3 max-w-2xl break-words text-[12.5px] leading-relaxed" style={{ color: '#aebfe4' }}>
-                    {p.description}
+                    {plain(p.description)}
                   </p>
                 )}
               </div>
@@ -561,7 +562,7 @@ export default function TokenAnalysis() {
             <p className="text-[12px]" style={{ color: '#66739a' }}>Nothing material flagged on this asset right now.</p>
           ) : (
             (p.catalysts || []).map((c, i) => {
-              const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
+              const text = plain(typeof c === 'string' ? c : c?.t) || '—'
               return <InsightRow key={i} icon={Check} tone="up" title={text} />
             })
           )}
@@ -571,7 +572,7 @@ export default function TokenAnalysis() {
             <p className="text-[12px]" style={{ color: '#66739a' }}>No risk flags raised on this asset right now.</p>
           ) : (
             (p.risks || []).map((c, i) => {
-              const text = typeof c === 'string' ? c : (c?.t || JSON.stringify(c))
+              const text = plain(typeof c === 'string' ? c : c?.t) || '—'
               return <InsightRow key={i} icon={AlertTriangle} tone="down" title={text} />
             })
           )}

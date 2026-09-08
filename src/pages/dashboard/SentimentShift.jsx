@@ -4,6 +4,7 @@ import { Gauge, RefreshCw, TrendingUp, TrendingDown, Minus, Clock, Quote, Sigma 
 import { motion } from 'framer-motion'
 import { useAgentData, useRunKey } from '../../hooks/useAgentData'
 import { fetchSentimentShift } from '../../lib/api'
+import { plain } from '../../lib/text'
 import {
   PanelV2, StatTile, ScoreBar, AnswerBanner, InsightRow, SourceRow,
   MicroLabel, LivePill, TONES,
@@ -249,7 +250,7 @@ export default function SentimentShift() {
             {quotes.length > 0 ? (
               quotes.map((q, i) => {
                 const handle = q?.handle || q?.author || q?.user || q?.source || null
-                const text = q?.text || q?.quote || q?.title || q?.body || null
+                const text = plain(q?.text || q?.quote || q?.title || q?.body || '') || null
                 const url = q?.url || q?.link || null
                 return (
                   <div key={i} className="flex flex-col gap-1.5">

@@ -10,6 +10,7 @@ import { motion } from 'framer-motion'
 import { buildReceipt, saveReceipt } from '../../data/receipts'
 import { fetchCouncil } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
+import { plain, prose } from '../../lib/text'
 import { ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import { BullMascot, BearMascot } from '../../components/CouncilMascots'
@@ -74,7 +75,7 @@ function DebateCard({ role, text, thinking, round }) {
         </span>
       ) : (
         <p className="mt-3 whitespace-pre-line break-words text-[12.5px] leading-relaxed" style={{ color: '#aebfe4' }}>
-          {text}
+          {prose(text).join('\n')}
         </p>
       )}
     </motion.div>
@@ -329,7 +330,7 @@ export default function Council() {
             rightTone="down"
           />
           <div className="mt-3 flex flex-col">
-            <InsightRow icon={Gavel} tone={verdictTone} title="The judge's ruling" body={judge.text} />
+            <InsightRow icon={Gavel} tone={verdictTone} title="The judge's ruling" body={plain(judge.text)} />
             <InsightRow
               icon={Scale}
               tone={decisive ? 'up' : 'amber'}

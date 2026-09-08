@@ -10,6 +10,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { fetchVerdict, peekVerdict } from '../../lib/api'
 import { stanceOf } from '../../lib/stance'
+import { plain, prose, asList, level } from '../../lib/text'
 import { fmtPrice, fmtPct, fmtNum, ErrorState } from '../../components/DashUI'
 import DyorNote from '../../components/DyorNote'
 import PercentLoader from '../../components/loaders/PercentLoader'
@@ -131,14 +132,18 @@ export default function DeepAnalysis() {
   const stance = stanceOf(v.verdict)
   const verdictTone = STANCE_TONE[stance.tone] || 'blue'
   const price = fmtPrice(v.priceUsd)
-  const bullReasons = Array.isArray(v.bullReasons) ? v.bullReasons : []
-  const bearReasons = Array.isArray(v.bearReasons) ? v.bearReasons : []
+  const bullReasons = asList(v.bullReasons)
+  const bearReasons = asList(v.bearReasons)
   const sources = Array.isArray(v.sources) ? v.sources.filter((s) => s?.url) : []
   const keyLevels = v.keyLevels && typeof v.keyLevels === 'object' ? v.keyLevels : {}
   const hasKeyLevels = ['support', 'resistance', 'stopLoss', 'target'].some((k) => keyLevels[k])
   const risk = v.riskAssessment && typeof v.riskAssessment === 'object' ? v.riskAssessment : null
-  const riskMetrics = Array.isArray(risk?.metrics) ? risk.metrics : []
-  const riskDataGaps = Array.isArray(risk?.dataGaps) ? risk.dataGaps : []
+  const riskMetrics = (Array.isArray(risk?.metrics) ? risk.metrics : [])
+    .map((m) => ({ ...m, label: plain(m?.label), text: plain(m?.text) }))
+  const riskDataGaps = asList(risk?.dataGaps)
+  const summary = plain(v.summary)
+  const gradeNote = plain(risk?.gradeNote)
+  const finalThesis = prose(v.finalThesis)
   const GRADE_TONE = { SEVERE: 'down', ELEVATED: 'down', MODERATE: 'amber', GUARDED: 'amber', CONTAINED: 'up' }
   const sideTone = (side) => (side === 'risk' ? 'down' : side === 'positive' ? 'up' : 'amber')
   const answer = `${v.name || v.symbol} shows ${stance.label} at ${price === '—' ? 'no published price' : price}, ${fmtPct(v.change24h)} on the day. `
@@ -182,7 +187,7 @@ export default function DeepAnalysis() {
 
       <PanelV2 icon={Activity} title="Bull vs Bear Tension" right={<MicroLabel>scored evidence</MicroLabel>} delay={0.18}>
         <ScoreBar left={v.bullScore} right={v.bearScore} leftLabel="Bull" rightLabel="Bear" leftTone="up" rightTone="down" />
-        <InsightRow icon={Microscope} tone={verdictTone} title={stance.label} body={v.summary} />
+        <InsightRow icon={Microscope} tone={verdictTone} title={stance.label} body={summary} />
       </PanelV2>
 
       {risk && (
@@ -200,8 +205,8 @@ export default function DeepAnalysis() {
             leftTone="up"
             rightTone="down"
           />
-          {risk.gradeNote && (
-            <InsightRow icon={ShieldAlert} tone={GRADE_TONE[risk.grade] || 'amber'} title={`${risk.grade} structural grade`} body={risk.gradeNote} />
+          {gradeNote && (
+            <InsightRow icon={ShieldAlert} tone={GRADE_TONE[risk.grade] || 'amber'} title={`${risk.grade} structural grade`} body={gradeNote} />
           )}
           <div className="mt-2 flex flex-col">
             {riskMetrics.map((m) => (
@@ -249,7 +254,7 @@ export default function DeepAnalysis() {
                       </span>
                     </span>
                   </div>
-                  <InsightRow icon={Activity} tone={tone} title={PILLAR_LABELS[k] || k} body={pillar.reasoning} />
+                  <InsightRow icon={Activity} tone={tone} title={PILLAR_LABELS[k] || k} body={plain(pillar.reasoning)} />
                 </div>
               )
             })}
@@ -265,7 +270,7 @@ export default function DeepAnalysis() {
               ].map(([label, value]) => (
                 <div key={label} className="cv-rowline">
                   <span className="cv-rowline-label">{label}</span>
-                  <span className="cv-rowline-cell text-right font-mono text-[12px]">{value || '—'}</span>
+                  <span className="cv-rowline-cell text-right font-mono text-[12px]">{level(value)}</span>
                 </div>
               ))
             ) : (
@@ -294,8 +299,12 @@ export default function DeepAnalysis() {
           </div>
 
           <PanelV2 icon={Microscope} title="Final Thesis" delay={0.36}>
-            {v.finalThesis ? (
-              <p className="text-[13px] leading-relaxed" style={{ color: '#aebfe4' }}>{v.finalThesis}</p>
+            {finalThesis.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {finalThesis.map((t, i) => (
+                  <p key={i} className="text-[13px] leading-relaxed" style={{ color: '#aebfe4' }}>{t}</p>
+                ))}
+              </div>
             ) : (
               <p className="text-[12px]" style={{ color: '#66739a' }}>No final thesis was published for this analysis run.</p>
             )}
