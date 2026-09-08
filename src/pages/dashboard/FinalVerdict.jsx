@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Crown, RefreshCw, Check, X, Microscope, Swords, Radio, ShieldAlert,
-  Globe, Gauge, AlertTriangle, Zap, Target, Clock, Layers, ArrowRight, Download,
+  Globe, Gauge, Zap, Clock, Layers, Download,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -17,7 +17,7 @@ import DyorNote from '../../components/DyorNote'
 import { stanceOf } from '../../lib/stance'
 import CandleLoader from '../../components/loaders/CandleLoader'
 import {
-  PanelV2, MicroLabel, ProgressMeter, Ring, TONES,
+  MicroLabel, ProgressMeter, Ring, TONES,
 } from '../../components/ConsoleUI'
 
 const DEFAULT_LIMITS = { maxPosition: 5, stopLoss: 8, minConviction: 60 }
@@ -61,6 +61,59 @@ function agoLabel(at) {
   return `${Math.round(mins / 60)}h ago`
 }
 
+// LLM fields sometimes arrive with markdown / fence dressing ("**bold**",
+// "- bullets", ```json fences, raw line breaks). The desk always reads as
+// clean prose, so strip the code-ish artifacts at render time.
+function plain(v) {
+  let s = String(v ?? '')
+  s = s.replace(/```[\s\S]*?```/g, ' ')
+  s = s.replace(/`/g, '')
+  s = s.replace(/^#{1,6}\s*/gm, '')
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1')
+  s = s.replace(/^\s*[-*•]\s+/gm, '')
+  s = s.replace(/^\s*\d+[.)]\s+/gm, '')
+  return s.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+// Multi-line prose: keep paragraph breaks, drop the code-ish dressing.
+function prose(v) {
+  return String(v ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`/g, '')
+    .replace(/^#{1,6}\s*/gm, '')
+    .split(/\n+/)
+    .map((l) => l.replace(/^\s*[-*•]\s+/, '').replace(/^\s*\d+[.)]\s+/, '').trim())
+    .filter(Boolean)
+}
+
+// Normalize an LLM list field (array of strings | array of objects | one blob
+// of text) into a clean string array.
+function asList(v) {
+  if (Array.isArray(v)) {
+    return v
+      .map((x) => (x && typeof x === 'object'
+        ? plain(x.t || x.text || x.point || x.read || x.summary || '')
+        : plain(x)))
+      .filter(Boolean)
+  }
+  if (typeof v === 'string' && v.trim()) return prose(v)
+  return []
+}
+
+function digestList(result) {
+  return (Array.isArray(result.agentDigests) ? result.agentDigests : [])
+    .map((d) => (typeof d === 'string'
+      ? { agent: 'Desk', weight: 'medium', read: plain(d) }
+      : {
+        agent: plain(d?.agent || d?.name || 'Agent'),
+        weight: d?.weight || 'medium',
+        read: plain(d?.read || d?.summary || d?.text || ''),
+      }))
+    .filter((d) => d.agent && d.read)
+}
+
 // The savable final template: the whole desk process (every agent's read) plus
 // the reconciled house view, as one markdown report the user keeps or shares.
 function buildFinalReport(result, sym, savedAt) {
@@ -70,47 +123,53 @@ function buildFinalReport(result, sym, savedAt) {
   const L = []
   L.push(`# VERDICT · FINAL TOKEN REPORT — ${result.name || sym} (${sym})`)
   L.push('')
-  L.push(`Master desk stance: **${deskStance.label}** · conviction ${result.conviction ?? '—'}/100 · timeframe ${result.timeframe || '—'}`)
+  L.push(`Master desk stance: **${deskStance.label}** · conviction ${result.conviction ?? '—'}/100 · timeframe ${plain(result.timeframe) || '—'}`)
   if (price > 0) L.push(`Price: ${fmtUsd(price)}${Number.isFinite(change) ? ` (${change >= 0 ? '+' : ''}${change.toFixed(2)}% 24h)` : ''}`)
   L.push(`Agents consulted: ${result.agentsUsed || '—'}${savedAt ? ` · saved read from ${agoLabel(savedAt)}` : ''}`)
   L.push('')
   L.push('## Final call')
-  L.push(result.headline || '—')
-  if (result.thesis) {
+  L.push(plain(result.headline) || '—')
+  const thesis = prose(result.thesis)
+  if (thesis.length) {
     L.push('')
     L.push('## Thesis')
-    L.push(result.thesis)
+    thesis.forEach((t) => L.push(t))
   }
   L.push('')
   L.push('## Judge scores')
   L.push(`- Bull case: ${result.bullScore ?? '—'}/100`)
   L.push(`- Bear case: ${result.bearScore ?? '—'}/100`)
-  if (result.keyPoints?.length) {
+  const points = asList(result.keyPoints)
+  if (points.length) {
     L.push('')
     L.push('## What moved the call')
-    result.keyPoints.forEach((p) => L.push(`- ${p.t}`))
+    points.forEach((p) => L.push(`- ${p}`))
   }
-  if (result.agentDigests?.length) {
+  const digests = digestList(result)
+  if (digests.length) {
     L.push('')
     L.push('## The process — every agent, in one line')
-    result.agentDigests.forEach((d, i) => L.push(`${i + 1}. **${d.agent}** (${d.weight} weight): ${d.read}`))
+    digests.forEach((d, i) => L.push(`${i + 1}. **${d.agent}** (${d.weight} weight): ${d.read}`))
   }
-  if (result.risks?.length) {
+  const risks = asList(result.risks)
+  if (risks.length) {
     L.push('')
     L.push('## What breaks this stance')
-    result.risks.forEach((r) => L.push(`- ${r}`))
+    risks.forEach((r) => L.push(`- ${r}`))
   }
-  if (result.catalysts?.length) {
+  const cats = asList(result.catalysts)
+  if (cats.length) {
     L.push('')
     L.push('## What could accelerate it')
-    result.catalysts.forEach((c) => L.push(`- ${c}`))
+    cats.forEach((c) => L.push(`- ${c}`))
   }
   L.push('')
   L.push('## Levels & discipline')
-  L.push(`- Support: ${result.levels?.support || '—'}`)
-  L.push(`- Resistance: ${result.levels?.resistance || '—'}`)
-  L.push(`- Invalidation: ${result.levels?.invalidation || '—'}`)
-  if (result.sizeNote) L.push(`- Sizing note: ${result.sizeNote}`)
+  L.push(`- Support: ${plain(result.levels?.support) || '—'}`)
+  L.push(`- Resistance: ${plain(result.levels?.resistance) || '—'}`)
+  L.push(`- Invalidation: ${plain(result.levels?.invalidation) || '—'}`)
+  const sizeNote = plain(result.sizeNote)
+  if (sizeNote) L.push(`- Sizing note: ${sizeNote}`)
   L.push('')
   L.push('---')
   L.push(`Generated by the Verdict agent console · ${new Date().toLocaleString()} · educational analysis, do your own research (DYOR) — not financial advice.`)
@@ -432,6 +491,24 @@ export default function FinalVerdict() {
   const deskStance = deskStanceOf(result.stance)
   const price = Number(result.priceUsd) || 0
   const change = Number(result.change24h)
+  // Sanitized view of every LLM field — the page never renders raw dressing.
+  const headline = plain(result.headline)
+  const thesisLines = prose(result.thesis)
+  const keyPoints = (Array.isArray(result.keyPoints) ? result.keyPoints : [])
+    .map((p) => (typeof p === 'string'
+      ? { t: plain(p), w: 'neutral' }
+      : { t: plain(p?.t || p?.text || p?.point || ''), w: p?.w || p?.weight || 'neutral' }))
+    .filter((p) => p.t)
+  const digests = digestList(result)
+  const risks = asList(result.risks)
+  const catalysts = asList(result.catalysts)
+  const levels = {
+    support: plain(result.levels?.support),
+    resistance: plain(result.levels?.resistance),
+    invalidation: plain(result.levels?.invalidation),
+  }
+  const sizeNote = plain(result.sizeNote)
+  const timeframe = plain(result.timeframe)
 
   return (
     <div className="flex flex-col gap-4">
@@ -461,10 +538,10 @@ export default function FinalVerdict() {
               {deskStance.blurb}
             </p>
             <p className="mx-auto mt-4 max-w-2xl text-[15px] font-semibold leading-snug sm:text-[17px]" style={{ color: '#f4f8ff' }}>
-              {result.headline}
+              {headline || 'The desk reconciled every agent pass on this token.'}
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-              <span className="cv-chip"><Clock size={12} /> {result.timeframe}</span>
+              <span className="cv-chip"><Clock size={12} /> {timeframe || 'this session'}</span>
               <span className="cv-chip"><Layers size={12} /> {result.agentsUsed} agents consulted</span>
               {price > 0 && <span className="cv-chip">{fmtUsd(price)}</span>}
               {Number.isFinite(change) && (
@@ -480,180 +557,229 @@ export default function FinalVerdict() {
           </div>
         </div>
 
-        {result.thesis && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.18, duration: 0.45 }}
-            className="mt-8 border-t pt-6 text-[13.5px] leading-[1.85] sm:text-[14.5px]"
-            style={{ borderColor: 'rgba(255,255,255,0.08)', color: '#c3d0ea' }}
-          >
-            {result.thesis}
-          </motion.p>
-        )}
       </motion.div>
 
-      {/* ── judge scores: one judge, both sides scored ── */}
-      <PanelV2
-        icon={Swords}
-        title="Judge scores — bull case vs bear case"
-        delay={0.08}
-        right={<MicroLabel>one judge weighed both sides</MicroLabel>}
+      {/* ── the final report card: every agent pass + the house view, one auto-generated view ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.99 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ delay: 0.06, type: 'spring', stiffness: 180, damping: 22 }}
+        className="cv-panel overflow-hidden"
+        style={{ borderColor: `${toneColor}33`, boxShadow: `0 0 46px ${toneColor}0f inset` }}
       >
-        <div className="grid gap-5 sm:grid-cols-2">
-          {[
-            { label: 'bull case', score: result.bullScore, color: TONES.up },
-            { label: 'bear case', score: result.bearScore, color: TONES.down },
-          ].map((side) => (
-            <div key={side.label}>
-              <div className="mb-2 flex items-baseline justify-between gap-3">
-                <MicroLabel>{side.label}</MicroLabel>
-                <span className="font-mono text-[22px] font-black leading-none" style={{ color: side.color }}>
-                  {Number.isFinite(side.score) ? side.score : '—'}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full border border-white/5 bg-white/[0.07]">
-                <motion.div
-                  className="h-full rounded-full"
-                  animate={{ width: `${Math.max(0, Math.min(100, Number(side.score) || 0))}%` }}
-                  transition={{ type: 'spring', stiffness: 120, damping: 24 }}
-                  style={{
-                    background: `linear-gradient(90deg, ${side.color}55, ${side.color})`,
-                    boxShadow: `0 0 12px ${side.color}66`,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-4 text-[12.5px] leading-relaxed" style={{ color: '#8b98bd' }}>
-          The master desk judged each side on the evidence every agent produced —
-          {' '}{Math.abs((result.bullScore ?? 0) - (result.bearScore ?? 0))} points separate the two cases on this pass.
-        </p>
-      </PanelV2>
-
-      {/* ── what moved the call ── */}
-      {result.keyPoints?.length > 0 && (
-        <PanelV2 icon={ArrowRight} title="What moved the call" delay={0.05}>
-          <div className="flex flex-col gap-2.5">
-            {result.keyPoints.map((p, i) => {
-              const c = TONES[POINT_TONE[p.w] || 'blue']
-              return (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.06 + i * 0.06, type: 'spring', stiffness: 240, damping: 22 }}
-                  className="flex items-start gap-3 rounded-xl border px-4 py-3"
-                  style={{ borderColor: `${c}2e`, background: `${c}0a` }}
-                >
-                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: c, boxShadow: `0 0 10px ${c}` }} />
-                  <p className="text-[13px] leading-relaxed" style={{ color: '#d5e0f5' }}>{p.t}</p>
-                </motion.div>
-              )
-            })}
-          </div>
-        </PanelV2>
-      )}
-
-      {/* ── what each agent said ── */}
-      {result.agentDigests?.length > 0 && (
-        <PanelV2
-          icon={Layers}
-          title="Every agent, in one line"
-          delay={0.1}
-          right={<MicroLabel>{failed ? `${failed} agent${failed > 1 ? 's' : ''} unavailable` : 'all agents reported'}</MicroLabel>}
+        {/* header strip */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 sm:px-8"
+          style={{ background: `${toneColor}0d`, borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
-          <div className="grid gap-2.5 md:grid-cols-2">
-            {result.agentDigests.map((d, i) => {
-              const meta = AGENTS.find((a) => a.name.toLowerCase().includes(String(d.agent).toLowerCase().split(' ')[0]))
-              const c = TONES[meta?.tone || 'blue']
-              const Icon = meta?.icon || Target
-              return (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 + i * 0.05, duration: 0.32 }}
-                  className="rounded-xl border p-3.5"
-                  style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.028)' }}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full border"
-                      style={{ color: c, borderColor: `${c}55`, background: `${c}14` }}
+          <div className="flex items-center gap-2.5">
+            <span
+              className="grid h-7 w-7 place-items-center rounded-lg"
+              style={{ color: TONES.amber, background: 'rgba(255,194,75,0.14)', border: '1px solid rgba(255,194,75,0.3)' }}
+            >
+              <Crown size={13} strokeWidth={2.2} />
+            </span>
+            <p className="text-[13px] font-bold uppercase tracking-[0.16em]" style={{ color: '#f4f8ff' }}>
+              Final report · {result.name || sym}
+            </p>
+          </div>
+          <MicroLabel>
+            auto-generated from {result.agentsUsed || settled} agent passes · {new Date(savedAt || Date.now()).toLocaleString()}
+          </MicroLabel>
+        </div>
+
+        {/* body */}
+        <div className="grid gap-8 px-6 py-7 sm:px-8 lg:grid-cols-[1.35fr_1fr]">
+          {/* left rail — thesis, what moved the call, the full process */}
+          <div className="min-w-0">
+            {thesisLines.length > 0 && (
+              <>
+                <MicroLabel>Thesis</MicroLabel>
+                <div className="mt-2.5 flex flex-col gap-2.5">
+                  {thesisLines.map((t, i) => (
+                    <motion.p
+                      key={i}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 + i * 0.06, duration: 0.3 }}
+                      className="text-[13px] leading-relaxed"
+                      style={{ color: '#c3d0ea' }}
                     >
-                      <Icon size={12} strokeWidth={2.2} />
-                    </span>
-                    <p className="min-w-0 flex-1 truncate text-[12.5px] font-semibold" style={{ color: '#f4f8ff' }}>{d.agent}</p>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em]"
-                      style={{ color: TONES[WEIGHT_TONE[d.weight] || 'blue'], background: `${TONES[WEIGHT_TONE[d.weight] || 'blue']}14` }}
-                    >
-                      {d.weight} weight
+                      {t}
+                    </motion.p>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {keyPoints.length > 0 && (
+              <>
+                <MicroLabel className="mt-7 block">What moved the call</MicroLabel>
+                <div className="mt-2.5 flex flex-col gap-2">
+                  {keyPoints.map((p, i) => {
+                    const c = TONES[POINT_TONE[p.w] || 'blue']
+                    return (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.12 + i * 0.05, type: 'spring', stiffness: 240, damping: 22 }}
+                        className="flex items-start gap-3 rounded-xl border px-3.5 py-2.5"
+                        style={{ borderColor: `${c}26`, background: `${c}08` }}
+                      >
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: c, boxShadow: `0 0 8px ${c}` }} />
+                        <p className="text-[12.5px] leading-relaxed" style={{ color: '#d5e0f5' }}>{p.t}</p>
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {digests.length > 0 && (
+              <>
+                <div className="mt-7 flex items-baseline justify-between gap-3">
+                  <MicroLabel>The process — every agent, in one line</MicroLabel>
+                  <MicroLabel>{failed ? `${failed} agent${failed > 1 ? 's' : ''} unavailable` : 'all agents reported'}</MicroLabel>
+                </div>
+                <div className="mt-2.5 flex flex-col gap-2.5">
+                  {digests.map((d, i) => {
+                    const wc = TONES[WEIGHT_TONE[d.weight] || 'blue']
+                    return (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.14 + i * 0.05, duration: 0.3 }}
+                        className="flex items-start gap-3 rounded-xl border px-3.5 py-3"
+                        style={{ borderColor: 'rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.025)' }}
+                      >
+                        <span
+                          className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[10px] font-bold"
+                          style={{ color: wc, borderColor: `${wc}55`, background: `${wc}14` }}
+                        >
+                          {i + 1}
+                        </span>
+                        <p className="min-w-0 text-[12.5px] leading-relaxed" style={{ color: '#a6b4d4' }}>
+                          <span className="font-semibold" style={{ color: '#d5e0f5' }}>{d.agent}</span>
+                          <span className="mx-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em]" style={{ color: wc }}>
+                            {d.weight} weight
+                          </span>
+                          {d.read}
+                        </p>
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* right rail — judge scores, risks, catalysts */}
+          <div className="min-w-0">
+            <MicroLabel>Judge scores — bull case vs bear case</MicroLabel>
+            <div className="mt-3 flex flex-col gap-4">
+              {[
+                { label: 'bull case', score: result.bullScore, color: TONES.up },
+                { label: 'bear case', score: result.bearScore, color: TONES.down },
+              ].map((side) => (
+                <div key={side.label}>
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <MicroLabel>{side.label}</MicroLabel>
+                    <span className="font-mono text-[24px] font-black leading-none" style={{ color: side.color }}>
+                      {Number.isFinite(Number(side.score)) ? side.score : '—'}
                     </span>
                   </div>
-                  <p className="mt-2.5 text-[12.5px] leading-relaxed" style={{ color: '#a6b4d4' }}>{d.read}</p>
-                </motion.div>
-              )
-            })}
+                  <div className="h-1.5 w-full overflow-hidden rounded-full border border-white/5 bg-white/[0.07]">
+                    <motion.div
+                      className="h-full rounded-full"
+                      animate={{ width: `${Math.max(0, Math.min(100, Number(side.score) || 0))}%` }}
+                      transition={{ type: 'spring', stiffness: 120, damping: 24 }}
+                      style={{
+                        background: `linear-gradient(90deg, ${side.color}55, ${side.color})`,
+                        boxShadow: `0 0 12px ${side.color}66`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[12px] leading-relaxed" style={{ color: '#8b98bd' }}>
+              One desk judged both sides on every agent's evidence —
+              {' '}{Math.abs((Number(result.bullScore) || 0) - (Number(result.bearScore) || 0))} points separate the two cases on this pass.
+            </p>
+
+            {risks.length > 0 && (
+              <>
+                <MicroLabel className="mt-7 block">What breaks this stance</MicroLabel>
+                <div className="mt-2.5 flex flex-col gap-2">
+                  {risks.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: TONES.down }} />
+                      <p className="text-[12.5px] leading-relaxed" style={{ color: '#b9c6e2' }}>{r}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {catalysts.length > 0 && (
+              <>
+                <MicroLabel className="mt-7 block">What could accelerate it</MicroLabel>
+                <div className="mt-2.5 flex flex-col gap-2">
+                  {catalysts.map((c, i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: TONES.up }} />
+                      <p className="text-[12.5px] leading-relaxed" style={{ color: '#b9c6e2' }}>{c}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-        </PanelV2>
-      )}
-
-      {/* ── risk vs catalyst ── */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {(result.risks?.length > 0) && (
-          <PanelV2 icon={AlertTriangle} title="What breaks this stance" delay={0.15}>
-            <div className="flex flex-col gap-2">
-              {result.risks.map((r, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: TONES.down }} />
-                  <p className="text-[12.5px] leading-relaxed" style={{ color: '#b9c6e2' }}>{r}</p>
-                </div>
-              ))}
-            </div>
-          </PanelV2>
-        )}
-        {(result.catalysts?.length > 0) && (
-          <PanelV2 icon={Zap} title="What could accelerate it" delay={0.2}>
-            <div className="flex flex-col gap-2">
-              {result.catalysts.map((c, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: TONES.up }} />
-                  <p className="text-[12.5px] leading-relaxed" style={{ color: '#b9c6e2' }}>{c}</p>
-                </div>
-              ))}
-            </div>
-          </PanelV2>
-        )}
-      </div>
-
-      {/* ── levels & discipline ── */}
-      <PanelV2 icon={Target} title="Levels the desk is watching" delay={0.25}>
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          {[
-            { label: 'Support', value: result.levels?.support, tone: 'up' },
-            { label: 'Resistance', value: result.levels?.resistance, tone: 'down' },
-            { label: 'Invalidation', value: result.levels?.invalidation, tone: 'amber' },
-          ].map((l) => (
-            <div
-              key={l.label}
-              className="rounded-xl border px-4 py-3.5"
-              style={{ borderColor: `${TONES[l.tone]}30`, background: `${TONES[l.tone]}0a` }}
-            >
-              <MicroLabel>{l.label}</MicroLabel>
-              <p className="mt-2 font-mono text-[13px] leading-snug" style={{ color: TONES[l.tone] }}>{l.value || '—'}</p>
-            </div>
-          ))}
         </div>
-        {result.sizeNote && (
-          <p className="mt-4 rounded-xl border px-4 py-3.5 text-[12.5px] leading-relaxed"
-            style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.025)', color: '#a6b4d4' }}>
-            {result.sizeNote}
-          </p>
-        )}
-      </PanelV2>
+
+        {/* levels + discipline strip */}
+        <div
+          className="grid gap-3 px-6 py-5 sm:px-8 lg:grid-cols-[1fr_1.2fr]"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+        >
+          <div>
+            <MicroLabel>Levels the desk is watching</MicroLabel>
+            <div className="mt-2.5 grid gap-2.5 sm:grid-cols-3">
+              {[
+                { label: 'Support', value: levels.support, tone: 'up' },
+                { label: 'Resistance', value: levels.resistance, tone: 'down' },
+                { label: 'Invalidation', value: levels.invalidation, tone: 'amber' },
+              ].map((l) => (
+                <div
+                  key={l.label}
+                  className="rounded-xl border px-3.5 py-3"
+                  style={{ borderColor: `${TONES[l.tone]}30`, background: `${TONES[l.tone]}0a` }}
+                >
+                  <MicroLabel>{l.label}</MicroLabel>
+                  <p className="mt-1.5 font-mono text-[12.5px] leading-snug" style={{ color: TONES[l.tone] }}>{l.value || '—'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          {sizeNote && (
+            <div className="flex items-end">
+              <p
+                className="w-full rounded-xl border px-4 py-3.5 text-[12.5px] leading-relaxed"
+                style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.025)', color: '#a6b4d4' }}
+              >
+                {sizeNote}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* footer strip */}
+        <div className="px-6 py-3.5 sm:px-8" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <MicroLabel>educational analysis · do your own research · not financial advice</MicroLabel>
+        </div>
+      </motion.div>
 
       {/* ── next steps + disclaimer ── */}
       <div className="cv-panel flex flex-wrap items-center justify-between gap-3 px-5 py-4">
