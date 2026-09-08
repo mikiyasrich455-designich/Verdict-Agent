@@ -557,8 +557,11 @@ async function applyCmcInfo(profile) {
   // chain at our contract — a lookalike can never steal another project's
   // description, logo or explorer.
   const native = items.find((i) => !String(i?.platform?.token_address || ''))
+  // Tickers collide (SOL = Solana AND Solcoin): a native major is pinned by the
+  // numeric id the keyed quote returned, never by "first platform-less listing".
   const info =
     items.find((i) => ca && String(i?.platform?.token_address || '').toLowerCase() === ca) ||
+    (profile.cmcId ? items.find((i) => String(i?.id) === String(profile.cmcId)) : null) ||
     (ca
       ? (items.length === 1 && listingIsOurAsset(profile, items[0]) ? items[0] : null)
       : native || (items.length === 1 ? items[0] : null))
