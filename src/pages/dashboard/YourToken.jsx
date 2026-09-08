@@ -8,7 +8,7 @@ import {
   ShieldAlert, MessageSquare, Microscope, Loader2, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { PanelV2, Spark, TokenLogo, LivePill, TONES } from '../../components/ConsoleUI'
-import { fmtPrice } from '../../components/DashUI'
+import { fmtPrice, fmtUsd } from '../../components/DashUI'
 import { resolveTokenInput } from '../../components/DashboardShell'
 import { setActiveToken, getActiveToken, identityFromParams, tokenHref } from '../../lib/activeToken'
 import { fetchMajors } from '../../lib/api'
@@ -158,6 +158,9 @@ export default function YourToken() {
           <div className="cv-quick-grid">
             {list.map((m) => {
               const up = (m.change24h || 0) >= 0
+              // The curve is the market's own hourly closes (key-free venue tape);
+              // a tile with no tape shows no curve rather than a fake zigzag.
+              const curve = Array.isArray(m.spark) && m.spark.length > 1 ? m.spark : []
               return (
                 <button key={m.symbol} type="button" className="cv-token-card text-left" onClick={() => pick(m)}>
                   <div className="cv-token-card-top">
@@ -166,6 +169,9 @@ export default function YourToken() {
                       <div className="cv-token-card-sym">{m.symbol}</div>
                       <div className="cv-token-card-name truncate">{m.name}</div>
                     </div>
+                    {m.rank ? (
+                      <span className="cv-chip ml-auto !py-0.5 shrink-0">#{m.rank}</span>
+                    ) : null}
                   </div>
                   <div className="mt-3 flex items-end justify-between gap-2">
                     <div className="min-w-0">
@@ -174,7 +180,11 @@ export default function YourToken() {
                         {up ? '+' : ''}{(m.change24h || 0).toFixed(2)}%
                       </div>
                     </div>
-                    <Spark points={[m.change1h, m.change24h, m.change7d]} tone={up ? 'up' : 'down'} w={62} h={26} />
+                    <Spark points={curve} tone={up ? 'up' : 'down'} w={62} h={26} />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-[#7c89b0]">
+                    <span className="truncate">Vol {fmtUsd(m.volume24h)}</span>
+                    <span className="truncate">Cap {fmtUsd(m.marketCap)}</span>
                   </div>
                 </button>
               )

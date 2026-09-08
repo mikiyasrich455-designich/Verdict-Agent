@@ -22,7 +22,7 @@ import { shortAddr } from '../lib/tokenResolver.js'
 import { callLLM, extractJsonLite, QWEN_MODELS } from '../lib/llm.js'
 import { stanceKey } from '../lib/stance.js'
 import { unwrapRyo } from '../lib/normalizers.js'
-import { cmcQuote } from '../lib/marketData.js'
+import { cmcQuote, venueCandles } from '../lib/marketData.js'
 
 const router = Router()
 
@@ -96,7 +96,8 @@ router.post('/market_overview', async (req, res) => {
 })
 
 // GET /api/proxy/ryo/majors — real CMC quotes powering the console quick-start tiles.
-// 1h / 24h / 7d changes double as a genuine 3-point sparkline (no invented series).
+// The tile curve is a REAL hourly tape from a key-free exchange venue (the same
+// feed the price-action panel trusts), never a 3-point zigzag of change values.
 router.get('/majors', async (req, res) => {
   const start = Date.now()
   try {
@@ -122,10 +123,28 @@ router.get('/majors', async (req, res) => {
           volume24h: q.volume_24h || 0,
           marketCap: q.market_cap || 0,
           logo: c.id ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png` : '',
+          spark: [],
+          sparkVenue: null,
         }
       })
       .sort((a, b) => (a.rank || 9999) - (b.rank || 9999))
     if (!majors.length) throw new Error('No major quotes available')
+    // One parallel round of key-free venue candles: the tile curve must be the
+    // market's own hourly closes. A silent venue leaves that tile's curve empty
+    // instead of inventing one.
+    await Promise.all(
+      majors.map(async (m) => {
+        try {
+          const tape = await venueCandles(m.symbol)
+          if (tape?.candles?.length > 3) {
+            m.spark = tape.candles.map((c) => c.price)
+            m.sparkVenue = tape.venue
+          }
+        } catch (err) {
+          error(`majors spark ${m.symbol}`, err)
+        }
+      }),
+    )
     setCache(cacheKey, majors, 60 * 1000)
     log('GET', '/ryo/majors', 200, Date.now() - start)
     res.json(majors)

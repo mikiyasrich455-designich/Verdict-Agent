@@ -516,17 +516,52 @@ async function recallCmcInfo(symbol) {
   return items
 }
 
+// CMC platform slugs vs the chain ids the DEX indexers use — the ticker alone
+// can never prove the asset, the chain has to agree too.
+const CMC_CHAIN_ALIAS = {
+  ethereum: 'ethereum', eth: 'ethereum',
+  'bnb-smart-chain': 'bsc', 'binance-smart-chain': 'bsc', binance: 'bsc', bnb: 'bsc', bsc: 'bsc',
+  solana: 'solana',
+  'polygon-pos': 'polygon', polygon: 'polygon', matic: 'polygon',
+  'avalanche-c-chain': 'avalanche', avalanche: 'avalanche', avax: 'avalanche',
+  'arbitrum-one': 'arbitrum', arbitrum: 'arbitrum',
+  'optimistic-ethereum': 'optimism', optimism: 'optimism',
+  base: 'base', fantom: 'fantom', sonic: 'sonic', sui: 'sui', aptos: 'aptos',
+  tron: 'tron', 'the-open-network': 'ton', ton: 'ton', cronos: 'cronos',
+  sei: 'sei', injective: 'injective', hyperliquid: 'hyperliquid',
+  cardano: 'cardano', 'near-protocol': 'near', near: 'near',
+  'hedera-hashgraph': 'hedera', hedera: 'hedera',
+}
+const chainKeyOf = (v) => CMC_CHAIN_ALIAS[String(v || '').toLowerCase()] || String(v || '').toLowerCase()
+
+// A same-ticker listing on another chain (or at another contract on our chain)
+// is a DIFFERENT project: borrowing its copy is how Solana's Jupiter ended up
+// wearing the dead Ethereum "jup.io" description and etherscan explorer.
+function listingIsOurAsset(profile, info) {
+  const ca = String(profile.ca || '').toLowerCase()
+  if (!ca) return true // native major coin — the ticker listing is the asset
+  const plat = info?.platform
+  if (!plat || !plat.slug) return false
+  const addr = String(plat.token_address || '').toLowerCase()
+  if (addr && addr !== ca) return false
+  const ours = chainKeyOf(profile.chain)
+  return !!ours && (chainKeyOf(plat.slug) === ours || chainKeyOf(plat.name) === ours)
+}
+
 async function applyCmcInfo(profile) {
   const items = await recallCmcInfo(profile.symbol)
   if (!items) return profile
   const ca = String(profile.ca || '').toLowerCase()
-  // CA match first (provably same asset). If our contract isn't in the listing's
-  // platform field, only borrow the copy when CMC returned a SINGLE unambiguous
-  // listing for the ticker — multiple same-ticker listings still require the CA
-  // match, so a lookalike can never steal another project's description.
+  // CA match first (provably same asset). Otherwise only borrow the copy when
+  // CMC returned a SINGLE listing for the ticker AND that listing lives on our
+  // chain at our contract — a lookalike can never steal another project's
+  // description, logo or explorer.
+  const native = items.find((i) => !String(i?.platform?.token_address || ''))
   const info =
     items.find((i) => ca && String(i?.platform?.token_address || '').toLowerCase() === ca) ||
-    (ca ? (items.length === 1 ? items[0] : null) : items[0])
+    (ca
+      ? (items.length === 1 && listingIsOurAsset(profile, items[0]) ? items[0] : null)
+      : native || (items.length === 1 ? items[0] : null))
   if (!info) return profile
 
   const first = (list) => (Array.isArray(list) && list.length ? list[0] : null)
@@ -1393,6 +1428,14 @@ export async function resolveToken(rawInput) {
     if (TICKER_RE.test(ticker) && MAJOR_COINS[ticker]) {
       const major = await majorCoinProfile(ticker)
       if (major) {
+        // A bare CMC quote is a number, not an analysis: the shared tail fills
+        // the real copy, links, categories and the hourly venue tape, exactly
+        // like every contract-resolved token gets.
+        try {
+          await hydrate(major, [])
+        } catch (err) {
+          console.warn('[tokenResolver] major enrichment skipped:', err.message)
+        }
         setCache(cacheKey, major, 3 * 60 * 1000)
         return major
       }

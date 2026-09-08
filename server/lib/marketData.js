@@ -402,13 +402,16 @@ export function cmcQuote(symbols) {
 }
 
 // Keyed CMC metadata: description, logo, links, tags. The backup identity
-// source when CoinGecko throttles a shared cloud IP.
+// source when CoinGecko throttles a shared cloud IP. v2 (not v1): a symbol
+// collision like JUP returns EVERY listing keyed by coin id, so the caller can
+// pick the one that publishes our contract — v1 silently answered with a single
+// (possibly lookalike) record.
 export function cmcInfo(symbol) {
   const key = process.env.CMC_API_KEY
   const sym = cleanSymbol(symbol)
   if (!key || !sym) return Promise.resolve(null)
 
-  const url = `${CMC_BASE}/cryptocurrency/info?symbol=${encodeURIComponent(sym)}`
+  const url = `https://pro-api.coinmarketcap.com/v2/cryptocurrency/info?symbol=${encodeURIComponent(sym)}`
   const fetchInfo = async () => {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 8000)
